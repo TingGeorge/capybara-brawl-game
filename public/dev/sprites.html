@@ -1,0 +1,92 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>像素圖總覽</title>
+<style>
+  body { margin: 0; padding: 16px; background: #2b2420; color: #f4ead0; font: 14px "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif; }
+  h2 { margin: 18px 0 8px; font-size: 16px; }
+  .row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+  .card { background: #5f9e4b; padding: 8px; border-radius: 6px; text-align: center; }
+  .card canvas { display: block; margin: 0 auto 4px; image-rendering: pixelated; }
+  .card span { font-size: 12px; color: #fff; text-shadow: 0 1px 0 #000; }
+</style>
+</head>
+<body>
+<h2>角色頭像 drawPortrait(canvas, id, 4)</h2>
+<div class="row" id="portraits"></div>
+<h2>走路動畫、瞄準方向（放大 4 倍）</h2>
+<div class="row" id="poses"></div>
+<h2>子彈 / 道具</h2>
+<div class="row" id="items"></div>
+<h2>地圖（縮小一半）</h2>
+<div class="row" id="map"></div>
+<script type="module">
+import { drawPortrait, drawCapybara, getProjectile, getProjectileFlat, getPeel, getStar, getGhost, getShieldBubble, getSpringPool, buildMapArt, MAP_MARGIN } from '/js/sprites.js';
+import { CHARACTERS } from '/shared/characters.js';
+
+function card(parent, label) {
+  const d = document.createElement('div');
+  d.className = 'card';
+  const c = document.createElement('canvas');
+  const s = document.createElement('span');
+  s.textContent = label;
+  d.append(c, s);
+  parent.append(d);
+  return c;
+}
+
+for (const ch of CHARACTERS) drawPortrait(card(document.getElementById('portraits'), `${ch.name} (${ch.id})`), ch.id, 4);
+
+// 每個角色畫 8 個瞄準方向 + 走路三格
+const poses = document.getElementById('poses');
+for (const ch of CHARACTERS.slice(0, 10)) {
+  const c = card(poses, ch.name);
+  const W = 8 * 34 + 3 * 26;
+  const H = 34;
+  const tmp = document.createElement('canvas');
+  tmp.width = W;
+  tmp.height = H;
+  const t = tmp.getContext('2d');
+  for (let i = 0; i < 8; i++) drawCapybara(t, ch.id, 17 + i * 34, 22, { aim: (i / 8) * Math.PI * 2 });
+  ['a', 'idle', 'b'].forEach((f, i) => drawCapybara(t, ch.id, 8 * 34 + 13 + i * 26, 22 + (i === 1 ? 0 : 0), { aim: 0, frame: f, bob: i === 1 ? 1 : 0 }));
+  c.width = W * 3;
+  c.height = H * 3;
+  const x = c.getContext('2d');
+  x.imageSmoothingEnabled = false;
+  x.drawImage(tmp, 0, 0, W * 3, H * 3);
+}
+
+const items = document.getElementById('items');
+const show = (cv, label, s = 5) => {
+  const c = card(items, label);
+  c.width = cv.width * s;
+  c.height = cv.height * s;
+  const x = c.getContext('2d');
+  x.imageSmoothingEnabled = false;
+  x.drawImage(cv, 0, 0, c.width, c.height);
+};
+for (const n of ['carrot', 'bigCarrot', 'orange', 'seed', 'melon', 'kernel', 'cob', 'popcorn', 'shard', 'drop']) {
+  show(getProjectileFlat(n), n);
+  show(getProjectile(n, -0.8).cv, `${n} rot`);
+}
+show(getPeel('blue'), 'peel blue');
+show(getPeel('red'), 'peel red');
+show(getStar(), 'star');
+show(getGhost(), 'ghost');
+show(getShieldBubble(), 'shield', 4);
+show(getSpringPool(28, 'blue'), 'spring', 3);
+
+const art = buildMapArt();
+const m = document.getElementById('map');
+const mc = card(m, 'ground + lips + bushes');
+mc.width = art.ground.width * 2;
+mc.height = art.ground.height * 2;
+const mx = mc.getContext('2d');
+mx.imageSmoothingEnabled = false;
+mx.drawImage(art.ground, 0, 0, mc.width, mc.height);
+for (const b of art.bushes) mx.drawImage(b.cv, (b.x + MAP_MARGIN) * 2, (b.y + MAP_MARGIN) * 2, b.cv.width * 2, b.cv.height * 2);
+window.done = true;
+</script>
+</body>
+</html>

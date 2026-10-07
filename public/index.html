@@ -1,0 +1,161 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>水豚大亂鬥</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <!-- 遊戲畫面（renderer 畫在這裡），永遠在最底層 -->
+  <canvas id="game"></canvas>
+
+  <!-- 所有介面疊在畫面上面 -->
+  <div id="ui">
+
+    <!-- 標題 / 加入畫面 -->
+    <section id="screen-join" class="screen menu-bg" hidden>
+      <div class="join-wrap">
+        <h1 class="logo" aria-label="水豚大亂鬥">
+          <span class="logo-main">水豚大亂鬥</span>
+          <span class="logo-sub">CAPYBARA BRAWL</span>
+        </h1>
+        <div id="join-portraits" class="join-portraits"></div>
+        <form id="join-form" class="panel join-panel" autocomplete="off">
+          <label class="join-label" for="join-name">你的名字</label>
+          <div class="join-row">
+            <input id="join-name" class="pixel-input" type="text" maxlength="10" spellcheck="false" placeholder="輸入暱稱">
+            <button id="join-btn" class="btn btn-gold btn-big" type="submit">加入大廳</button>
+          </div>
+          <p id="join-error" class="join-error" role="alert"></p>
+        </form>
+        <p class="join-hint">和同一個 Wi-Fi 的朋友一起 3 對 3 大亂鬥！</p>
+      </div>
+    </section>
+
+    <!-- 大廳 -->
+    <section id="screen-lobby" class="screen menu-bg" hidden>
+      <div class="lobby">
+        <header class="lobby-head">
+          <div class="lobby-title">
+            <span class="logo-mini">水豚大亂鬥</span>
+            <span class="tag">大廳</span>
+          </div>
+          <div id="lobby-banner" class="lobby-banner" hidden>對戰進行中，下一場就能加入</div>
+          <div id="lobby-count" class="lobby-count"></div>
+        </header>
+
+        <div class="team-col team-blue" data-team="blue">
+          <div class="team-head">藍隊</div>
+          <div id="team-blue-slots" class="team-slots"></div>
+          <button id="btn-team-blue" class="btn btn-blue" type="button">加入藍隊</button>
+        </div>
+
+        <div class="lobby-center">
+          <div id="char-grid" class="char-grid"></div>
+          <div id="char-detail" class="panel char-detail"></div>
+        </div>
+
+        <div class="team-col team-red" data-team="red">
+          <div class="team-head">紅隊</div>
+          <div id="team-red-slots" class="team-slots"></div>
+          <button id="btn-team-red" class="btn btn-red" type="button">加入紅隊</button>
+        </div>
+
+        <footer class="lobby-foot">
+          <div class="panel share-box">
+            <div class="share-title">叫朋友（同一個 Wi-Fi）用瀏覽器打開：</div>
+            <div id="share-urls" class="share-urls"></div>
+            <div id="controls-help" class="controls-help"></div>
+          </div>
+          <div class="panel host-box">
+            <label id="bots-label" class="check">
+              <input id="bots-check" type="checkbox">
+              <span class="check-box" aria-hidden="true"></span>
+              <span class="check-text">用電腦水豚補滿 3 對 3</span>
+            </label>
+            <button id="btn-start" class="btn btn-gold btn-start" type="button">開始對戰！</button>
+            <div id="wait-host" class="wait-host" hidden>等待房主開始<span class="dots"></span></div>
+          </div>
+        </footer>
+      </div>
+    </section>
+
+    <!-- 對戰中的 HUD（不攔截滑鼠） -->
+    <section id="hud" class="screen hud" hidden>
+      <div class="hud-top">
+        <div id="hud-scorebar" class="scorebar">
+          <div class="sb-side sb-blue">
+            <div id="hud-team-blue" class="sb-team"></div>
+            <div class="sb-score-wrap">
+              <div id="hud-score-blue" class="sb-score">0</div>
+              <div id="hud-mine-blue" class="sb-mine" hidden>我方</div>
+            </div>
+          </div>
+          <div class="sb-mid">
+            <div id="hud-clock" class="sb-clock">0:00</div>
+            <div id="hud-goal" class="sb-goal"></div>
+          </div>
+          <div class="sb-side sb-red">
+            <div class="sb-score-wrap">
+              <div id="hud-score-red" class="sb-score">0</div>
+              <div id="hud-mine-red" class="sb-mine" hidden>我方</div>
+            </div>
+            <div id="hud-team-red" class="sb-team"></div>
+          </div>
+        </div>
+        <div id="hud-spectator" class="hud-spectator" hidden>觀戰中，下一場就能加入</div>
+      </div>
+
+      <div id="hud-ping" class="hud-ping"><span class="ping-dot"></span><span id="hud-ping-text">-- ms</span><span id="hud-muted" class="hud-muted" hidden>靜音中</span></div>
+      <ul id="killfeed" class="killfeed"></ul>
+
+      <div id="hud-dead" class="hud-dead" hidden>
+        <div class="dead-box">
+          <div class="dead-title">被打倒了…</div>
+          <div class="dead-sub"><span id="hud-respawn">3</span> 秒後復活</div>
+        </div>
+      </div>
+
+      <div id="hud-countdown" class="hud-countdown" hidden></div>
+
+      <div id="hud-super" class="super-btn" style="--charge: 0">
+        <div class="super-ring"></div>
+        <div class="super-core">
+          <div id="hud-super-name" class="super-name">大招</div>
+          <div class="super-key">右鍵 / E</div>
+        </div>
+        <div id="hud-super-pct" class="super-pct">0%</div>
+      </div>
+
+      <div id="scoreboard" class="scoreboard" hidden></div>
+    </section>
+
+    <!-- 結算畫面 -->
+    <section id="screen-result" class="screen result-bg" hidden>
+      <div class="result">
+        <div id="result-title" class="result-title"></div>
+        <div id="result-sub" class="result-sub"></div>
+        <div id="result-score" class="result-score"></div>
+        <div id="result-tables" class="result-tables"></div>
+        <div class="result-foot">即將回到大廳<span class="dots"></span></div>
+      </div>
+    </section>
+
+    <!-- 斷線 -->
+    <section id="screen-disconnected" class="screen menu-bg" hidden>
+      <div class="panel disc-box">
+        <div class="disc-icon" aria-hidden="true"></div>
+        <div class="disc-title">和伺服器的連線中斷了</div>
+        <p class="disc-sub">請確認開伺服器的電腦還開著，而且大家都在同一個 Wi-Fi。</p>
+        <button id="btn-reconnect" class="btn btn-gold btn-big" type="button">重新連線</button>
+      </div>
+    </section>
+
+    <!-- 小提示訊息 -->
+    <div id="toasts" class="toasts" aria-live="polite"></div>
+  </div>
+
+  <script type="module" src="/js/main.js"></script>
+</body>
+</html>

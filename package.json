@@ -1,0 +1,14 @@
+{
+  "name": "capybara-brawl",
+  "version": "0.1.0",
+  "description": "水豚大亂鬥：可以在同一個 Wi-Fi 下和朋友連線對戰的像素風網頁遊戲",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "test": "node --test"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

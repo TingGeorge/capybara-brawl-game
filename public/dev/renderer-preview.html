@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Renderer 預覽</title>
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; }
+  canvas#game { display: block; width: 100vw; height: 100vh; cursor: crosshair; }
+  #info {
+    position: fixed; left: 8px; bottom: 8px; color: #fff; font: 12px/1.4 monospace;
+    background: rgba(0, 0, 0, 0.55); padding: 4px 8px; border-radius: 4px; pointer-events: none;
+  }
+</style>
+</head>
+<body>
+<canvas id="game"></canvas>
+<div id="info"></div>
+<script type="module">
+// 開發用：餵假的 RenderState 給 Renderer，方便截圖檢查畫面。
+// 網址參數：?cam=x,y 鏡頭位置；?aim=bullet|lob|melee|trap|zone|leap|dash|spin|shield|fan|none 固定瞄準線；
+//          ?follow=1 鏡頭跟著自己走；?nofx=1 不放特效；?myteam=red 自己在紅隊；?spec=1 觀戰（沒有自己）；
+//          ?ambient=1 大廳背景模式（幾隻水豚散步，沒有血條、名字、光圈）
+import { Renderer } from '/js/renderer.js';
+import { FLAG } from '/shared/constants.js';
+
+const params = new URLSearchParams(location.search);
+const canvas = document.getElementById('game');
+const renderer = new Renderer(canvas);
+window.renderer = renderer;
+window.addEventListener('resize', () => renderer.resize());
+
+const info = document.getElementById('info');
+let mouse = null;
+canvas.addEventListener('mousemove', (e) => { mouse = renderer.screenToWorld(e.clientX, e.clientY); });
+
+const camParam = params.get('cam');
+const fixedCam = camParam ? camParam.split(',').map(Number) : null;
+const aimParam = params.get('aim');
+const follow = params.get('follow') === '1';
+const noFx = params.get('nofx') === '1';
+
+// 角色擺位
+const P = (id, name, team, charId, x, y, extra = {}) => ({
+  id, name, team, charId, x, y, z: 0, aim: team === 'blue' ? 0 : Math.PI, hp: 2000, maxHp: 3000, alive: true,
+  isMe: false, isAlly: false, flags: 0, moving: false, ammo: 3, maxAmmo: 3, superCharge: 0, ...extra,
+});
+const MAXHP = { carrot: 2800, yuzu: 2600, melon: 3000, corn: 2400, banana: 4400, leek: 4200, pineapple: 4000, pumpkin: 7200, coconut: 6600, onsen: 6200 };
+const base = [
+  P('me', '我是蘿蔔', 'blue', 'carrot', 200, 182, { isMe: true, superCharge: 1, ammo: 1.55 }),
+  P('a1', '柚子控', 'blue', 'yuzu', 92, 140, { isAlly: true }),
+  P('a2', '香蕉君', 'blue', 'banana', 146, 162, { isAlly: true, flags: FLAG.HIDDEN }),
+  P('a3', '南瓜盾', 'blue', 'pumpkin', 70, 262, { isAlly: true, flags: FLAG.SHIELD }),
+  P('a4', '老爺爺', 'blue', 'onsen', 312, 214, { isAlly: true, flags: FLAG.PROTECT, inSpring: true }),
+  P('e1', '西瓜籽籽', 'red', 'melon', 330, 128, { flags: FLAG.STUN }),
+  P('e2', '玉米狙擊手', 'red', 'corn', 440, 92),
+  P('e3', '蔥蔥', 'red', 'leek', 250, 262, { flags: FLAG.SPIN }),
+  P('e4', '鳳梨拳', 'red', 'pineapple', 400, 212, { flags: FLAG.DASH }),
+  P('e5', '椰子哥', 'red', 'coconut', 335, 296),
+];
+const spectator = params.get('spec') === '1';
+const myTeam = spectator ? null : params.get('myteam') || 'blue';
+for (const p of base) {
+  if (p.isMe) {
+    if (spectator) p.isMe = false;
+    else p.team = myTeam;
+  }
+  p.isAlly = !!myTeam && !p.isMe && p.team === myTeam;
+  p.maxHp = MAXHP[p.charId];
+  p.hp = Math.round(p.maxHp * (0.35 + ((p.id.charCodeAt(1) * 37) % 60) / 100));
+}
+
+const AIMS = ['bullet', 'fan', 'lob', 'melee', 'trap', 'zone', 'leap', 'dash', 'spin', 'shield'];
+
+function lobPos(sx, sy, tx, ty, u, h) {
+  return { x: sx + (tx - sx) * u, y: sy + (ty - sy) * u, z: 4 * h * u * (1 - u) };
+}
+
+const ambientMode = params.get('ambient') === '1';
+const strollers = ['carrot', 'yuzu', 'leek', 'onsen', 'pumpkin'].map((charId, i) => ({
+  id: `amb${i}`, charId, ambient: true, alive: true, x: 0, y: 0, z: 0, aim: 0, moving: true, flags: 0,
+}));
+function ambientFrame(now, t) {
+  const players = strollers.map((p, i) => {
+    const q = { ...p };
+    if (p.charId === 'onsen') {
+      // 泡湯長老坐在溫泉裡
+      q.x = 316;
+      q.y = 210;
+      q.moving = false;
+      q.inSpring = true;
+      q.aim = Math.PI;
+      return q;
+    }
+    const a = t * (0.12 + i * 0.03) + i * 1.7;
+    const nx = 320 + Math.cos(a) * (150 + i * 20);
+    const ny = 208 + Math.sin(a * 1.3) * (80 + i * 6);
+    const a2 = a + 0.01;
+    const dx = 320 + Math.cos(a2) * (150 + i * 20) - nx;
+    q.x = nx;
+    q.y = ny;
+    q.aim = dx >= 0 ? 0.2 : Math.PI - 0.2;
+    return q;
+  });
+  const camera = { x: 320 + Math.cos(t * 0.05) * 120, y: 208 + Math.sin(t * 0.07) * 60 };
+  renderer.render({ now, camera, myId: null, myTeam: null, players, projectiles: [], zones: [], aim: null });
+  info.textContent = `ambient Z=${renderer.Z}`;
+  requestAnimationFrame(frame);
+}
+
+const t0 = performance.now() / 1000;
+let nextFx = 0;
+let fxStep = 0;
+
+function frame() {
+  const now = performance.now() / 1000;
+  const t = now - t0;
+  if (ambientMode) return ambientFrame(now, t);
+  const players = base.map((p) => ({ ...p }));
+  const me = players[0];
+
+  // 自己繞小圈走
+  me.x = 200 + Math.cos(t * 0.9) * 14;
+  me.y = 182 + Math.sin(t * 0.9) * 8;
+  me.moving = true;
+  me.aim = mouse ? Math.atan2(mouse.y - me.y, mouse.x - me.x) : -0.35 + Math.sin(t * 0.7) * 0.5;
+  me.ammo = (t * 0.6) % 3;
+  // 西瓜籽左右踱步（被暈住所以不動）
+  // 鳳梨衝刺：左右來回
+  const e4 = players.find((p) => p.id === 'e4');
+  e4.x = 400 - ((t * 60) % 70);
+  e4.moving = true;
+  // 柚子控走來走去
+  const a1 = players.find((p) => p.id === 'a1');
+  a1.x = 92 + Math.sin(t * 1.3) * 10;
+  a1.moving = true;
+  a1.aim = 0.3;
+  // 玉米瞄準我
+  const e2 = players.find((p) => p.id === 'e2');
+  e2.aim = Math.atan2(me.y - e2.y, me.x - e2.x);
+  // 椰子哥跳躍
+  const e5 = players.find((p) => p.id === 'e5');
+  const lu = (t * 0.8) % 1;
+  e5.x = 380 - lu * 50;
+  e5.y = 300 - lu * 10;
+  e5.z = Math.round(4 * 22 * lu * (1 - lu));
+  e5.flags = FLAG.LEAP;
+  e5.aim = Math.PI;
+  // 南瓜盾向上瞄
+  players.find((p) => p.id === 'a3').aim = -1.2;
+  players.find((p) => p.id === 'e3').moving = true;
+
+  // 子彈
+  const projectiles = [];
+  let pid = 1;
+  const bullet = (sprite, x0, y0, a, speed, range, team) => {
+    const d = (t * speed) % range;
+    projectiles.push({ id: pid++, kind: 'bullet', sprite, x: x0 + Math.cos(a) * d, y: y0 + Math.sin(a) * d, z: 0, angle: a, team });
+  };
+  bullet('carrot', 210, 182, -0.3, 120, 140, 'blue');
+  bullet('carrot', 210, 186, 0.05, 120, 140, 'blue');
+  for (let i = -1; i <= 1; i++) bullet('seed', 325, 130, Math.PI + i * 0.12, 110, 110, 'red');
+  bullet('kernel', 432, 94, Math.PI - 0.1, 160, 160, 'red');
+  bullet('bigCarrot', 120, 230, 0.05, 90, 160, 'blue');
+  bullet('melon', 240, 310, Math.PI, 50, 120, 'red');
+  for (let i = 0; i < 4; i++) bullet('drop', 318, 214, -0.4 + i * 0.17 - Math.PI / 2 + 1.2, 80, 60, 'blue');
+  for (let i = 0; i < 5; i++) bullet('shard', 372, 262, Math.PI - 0.3 + i * 0.15, 90, 55, 'red');
+  for (let i = 0; i < 10; i++) bullet('popcorn', 440, 280, (i / 10) * Math.PI * 2, 60, 50, 'red');
+  // 拋物線
+  const u1 = (t * 0.9) % 1;
+  projectiles.push({ id: pid++, kind: 'lob', sprite: 'orange', ...lobPos(96, 140, 190, 110, u1, 28), team: 'blue' });
+  const u2 = (t * 0.7 + 0.4) % 1;
+  projectiles.push({ id: pid++, kind: 'lob', sprite: 'cob', ...lobPos(440, 92, 300, 170, u2, 34), team: 'red' });
+
+  const zones = [
+    { id: 1, kind: 'trap', x: 248, y: 140, r: 9, team: 'blue', remaining: 8 },
+    { id: 2, kind: 'trap', x: 175, y: 290, r: 9, team: 'red', remaining: 8 },
+    { id: 3, kind: 'spring', x: 112, y: 292, r: 28, team: 'blue', remaining: 0.5 + ((t * 0.5) % 4) },
+  ];
+
+  let aimKind = aimParam || AIMS[Math.floor(t / 2) % AIMS.length];
+  let aim = null;
+  if (aimKind !== 'none') {
+    const a = me.aim;
+    const specs = {
+      bullet: { kind: 'bullet', range: 144, spread: 0 },
+      fan: { kind: 'bullet', range: 120, spread: 0.24 },
+      lob: { kind: 'lob', range: 112, aoe: 18 },
+      melee: { kind: 'melee', range: 26, arc: 1.9 },
+      trap: { kind: 'trap', range: 112, aoe: 9, isSuper: true },
+      zone: { kind: 'zone', range: 96, aoe: 28, isSuper: true },
+      leap: { kind: 'leap', range: 96, aoe: 28, isSuper: true },
+      dash: { kind: 'dash', range: 96, isSuper: true },
+      spin: { kind: 'spin', aoe: 26, isSuper: true },
+      shield: { kind: 'shield', aoe: 14, isSuper: true },
+    };
+    aim = { x: me.x, y: me.y, angle: a, dist: mouse ? Math.hypot(mouse.x - me.x, mouse.y - me.y) : 80, ...specs[aimKind] };
+  }
+
+  const camera = fixedCam ? { x: fixedCam[0], y: fixedCam[1] } : follow ? { x: me.x, y: me.y } : { x: 230, y: 200 };
+  if (spectator) aim = null;
+  renderer.render({ now, camera, myId: spectator ? null : 'me', myTeam, players, projectiles, zones, aim });
+
+  // 定時放特效
+  if (!noFx && now >= nextFx) {
+    nextFx = now + 0.35;
+    const fx = renderer.fx;
+    const step = fxStep++ % 16;
+    const e1 = players.find((p) => p.id === 'e1');
+    switch (step) {
+      case 0: fx.damage(e1.x, e1.y, 720, 'dealt'); fx.hitFlash('e1'); fx.muzzle(me.x, me.y, me.aim, 'carrot'); fx.pop(e1.x, e1.y, 'carrot'); break;
+      case 1: fx.slash(146, 162, 0.2, 26, 1.9, 'banana'); fx.damage(me.x, me.y, 300, 'taken'); fx.hitFlash('me'); break;
+      case 2: fx.boom(190, 110, 18, 'orange'); fx.damage(250, 262, 950, 'other'); break;
+      case 3: fx.slash(250, 262, Math.PI, 34, 0.8, 'leek'); fx.muzzle(e2.x, e2.y, e2.aim, 'corn'); break;
+      case 4: fx.boom(300, 170, 16, 'cob'); break;
+      case 5: fx.slash(400, 212, Math.PI, 22, 1.4, 'pineapple'); fx.damage(a1.x, a1.y, 600, 'heal'); break;
+      case 6: fx.boom(330, 300, 28, 'slam'); break;
+      case 7: fx.slash(70, 262, -1.2, 28, 2.4, 'pumpkin'); fx.pop(260, 130, 'seed'); break;
+      case 8: fx.ko(440, 160, 'red', 'melon'); break;
+      case 9: fx.spawn(30, 200); fx.pop(150, 150, 'drop'); break;
+      case 10: fx.slip(175, 290); break;
+      case 11: fx.bonk(290, 312); fx.muzzle(318, 214, -1.2, 'onsen'); break;
+      case 12: fx.superCast(me.x, me.y, 'carrot'); break;
+      case 13: fx.muzzle(330, 128, Math.PI, 'melon'); fx.damage(e1.x, e1.y, 300, 'dealt'); fx.damage(e1.x, e1.y, 300, 'dealt'); break;
+      case 14: fx.pop(240, 110, 'kernel'); fx.pop(200, 230, 'bigCarrot'); fx.muzzle(a1.x, a1.y, 0.3, 'yuzu'); break;
+      case 15: fx.boom(220, 240, 18, 'orange'); break;
+    }
+  }
+  info.textContent = `Z=${renderer.Z} aim=${aimKind} ${canvas.width}x${canvas.height}` + (mouse ? ` mouse=${mouse.x.toFixed(1)},${mouse.y.toFixed(1)}` : '');
+  requestAnimationFrame(frame);
+}
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
