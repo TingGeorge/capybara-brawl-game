@@ -116,6 +116,8 @@ net.on('pong', (m) => {
 });
 
 net.onclose = () => {
+  // 還沒進大廳就被斷線（例如房間滿了）：留在開頭畫面，讓剛剛的錯誤訊息繼續顯示
+  if (!joined) return;
   game = null;
   input.setEnabled(false);
   showDisconnected(() => location.reload());

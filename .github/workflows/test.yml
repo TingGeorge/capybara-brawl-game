@@ -1,0 +1,63 @@
+name: 測試
+
+# 每次推送程式或開 Pull Request 都會自動跑；也可以在 Actions 頁面手動按 Run workflow
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  unit:
+    # 遊戲規則、電腦對戰、連線、伺服器啟動，在三種作業系統上各跑一次
+    name: 單元測試 · ${{ matrix.os }} · Node ${{ matrix.node }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+        node: [22]
+        include:
+          # README 說 Node 18 以上就能玩，所以也測最舊的版本
+          - os: ubuntu-latest
+            node: 18
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - run: npm test
+
+  browser:
+    # 真的開瀏覽器連線玩：Chrome、Firefox、Safari（WebKit）
+    name: 瀏覽器實玩 · ${{ matrix.browser }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { os: ubuntu-latest, browser: chromium }
+          - { os: ubuntu-latest, browser: firefox }
+          - { os: macos-latest, browser: webkit }
+          - { os: windows-latest, browser: chromium }
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: 安裝 Playwright（只有測試需要，玩遊戲不用）
+        run: npm install --no-save playwright@1.56.1
+      - name: 下載瀏覽器
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+      - name: 實玩測試
+        run: npm run test:e2e
+        env:
+          BROWSER: ${{ matrix.browser }}
+      - name: 保存測試截圖
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots-${{ matrix.browser }}-${{ matrix.os }}
+          path: e2e/artifacts/
+          if-no-files-found: ignore

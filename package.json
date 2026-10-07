@@ -6,7 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server/index.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:e2e": "node --test e2e/game.e2e.mjs"
   },
   "engines": {
     "node": ">=18"

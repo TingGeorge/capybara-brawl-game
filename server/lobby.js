@@ -11,8 +11,10 @@ function cleanName(raw) {
 }
 
 export class Lobby {
-  constructor({ lanUrls }) {
+  constructor({ lanUrls, koTarget = KO_TARGET, duration = MATCH_SECONDS }) {
     this.lanUrls = lanUrls;
+    this.koTarget = koTarget;
+    this.duration = duration;
     this.clients = new Set();
     this.nextId = 1;
     this.hostId = null;
@@ -159,11 +161,11 @@ export class Lobby {
       return this.send(host, { t: 'error', msg: '兩隊都至少要有一隻水豚。可以打開「電腦補位」或請朋友換隊。' });
     }
 
-    this.matchInfo = { players: roster, koTarget: KO_TARGET, duration: MATCH_SECONDS };
+    this.matchInfo = { players: roster, koTarget: this.koTarget, duration: this.duration };
     this.match = new Match({
       players: roster,
-      koTarget: KO_TARGET,
-      duration: MATCH_SECONDS,
+      koTarget: this.koTarget,
+      duration: this.duration,
       send: (text) => this.broadcast(text),
     });
     this.resultTimer = 0;

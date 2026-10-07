@@ -1,5 +1,6 @@
 // 水豚大亂鬥伺服器：提供網頁檔案 + WebSocket 連線 + 遊戲迴圈。
 // 啟動：node server/index.js（或 npm start），預設埠號 3000，可用 PORT=xxxx 改。
+// 想打短一點或長一點的比賽：MATCH_SECONDS=120 KO_TARGET=10 npm start
 import http from 'node:http';
 import fs from 'node:fs';
 import os from 'node:os';
@@ -13,6 +14,7 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const SHARED_DIR = path.join(ROOT, 'shared');
 const PORT = Number(process.env.PORT) || 3000;
+const envNumber = (name) => (Number(process.env[name]) > 0 ? Number(process.env[name]) : undefined);
 
 const MIME = {
   '.html': 'text/html; charset=utf-8',
@@ -67,8 +69,8 @@ function serveStatic(req, res) {
   });
 }
 
-export function startServer(port = PORT, { quiet = false } = {}) {
-  const lobby = new Lobby({ lanUrls: () => lanAddresses().map((ip) => `http://${ip}:${port}`) });
+export function startServer(port = PORT, { quiet = false, duration = envNumber('MATCH_SECONDS'), koTarget = envNumber('KO_TARGET') } = {}) {
+  const lobby = new Lobby({ lanUrls: () => lanAddresses().map((ip) => `http://${ip}:${port}`), duration, koTarget });
   const server = http.createServer(serveStatic);
 
   server.on('upgrade', (req, socket, head) => {
@@ -124,6 +126,15 @@ export function startServer(port = PORT, { quiet = false } = {}) {
   return { server, lobby, stop };
 }
 
-if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  startServer();
+// 直接執行這個檔案時才開伺服器（測試 import 它時不會）。
+// Windows 的磁碟代號大小寫、macOS 的 /tmp 捷徑都可能讓路徑字串不一樣，所以比對真實路徑、不分大小寫。
+function isMainModule() {
+  try {
+    const real = (p) => fs.realpathSync(p).toLowerCase();
+    return real(process.argv[1]) === real(fileURLToPath(import.meta.url));
+  } catch {
+    return false;
+  }
 }
+
+if (isMainModule()) startServer();

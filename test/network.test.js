@@ -33,7 +33,10 @@ function client(name) {
   };
 }
 
-test('兩個玩家連線、開局、移動，第三人斷線後會被電腦接手', async () => {
+// Node 22 以上才有內建的 WebSocket 用戶端
+const skip = typeof WebSocket === 'undefined' && '這個 Node 版本沒有內建 WebSocket 用戶端';
+
+test('兩個玩家連線、開局、移動，第三人斷線後會被電腦接手', { skip }, async () => {
   const { server, stop } = startServer(PORT, { quiet: true });
   await new Promise((r) => server.once('listening', r));
   try {

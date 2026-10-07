@@ -8,6 +8,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/TingGeorge/capybara-brawl-game/actions/workflows/test.yml"><img alt="測試狀態" src="https://github.com/TingGeorge/capybara-brawl-game/actions/workflows/test.yml/badge.svg"></a>
   <img alt="玩家 1～6 人" src="https://img.shields.io/badge/%E7%8E%A9%E5%AE%B6-1%EF%BD%9E6%20%E4%BA%BA-4aa3ff">
   <img alt="Node.js 18+" src="https://img.shields.io/badge/Node.js-18%2B-5fa04e?logo=node.js&logoColor=white">
   <img alt="依賴套件 0 個" src="https://img.shields.io/badge/%E4%BE%9D%E8%B3%B4%E5%A5%97%E4%BB%B6-0%20%E5%80%8B-a8703f">
@@ -147,12 +148,25 @@
 server/    網頁伺服器、遊戲迴圈、大廳、對戰模擬、電腦 AI
 shared/    伺服器和瀏覽器共用：常數、地圖、角色數值、碰撞
 public/    網頁：畫面繪製、像素圖、介面、音效、連線
-test/      npm test：電腦對戰模擬、連線測試
+test/      npm test：遊戲規則、電腦對戰、連線測試
+e2e/      npm run test:e2e：瀏覽器實玩測試
 ```
 
+想打短一點或長一點的比賽，可以在啟動時設定（秒數、擊倒數）：
+
 ```bash
-npm test   # 跑測試
+MATCH_SECONDS=120 KO_TARGET=10 npm start
 ```
+
+測試：
+
+```bash
+npm test          # 遊戲規則、每隻角色的大招、電腦對戰、連線、伺服器啟動
+npm run test:e2e  # 真的開瀏覽器連線玩（先執行 npm install --no-save playwright 和 npx playwright install chromium）
+```
+
+每次推送程式，[GitHub Actions](https://github.com/TingGeorge/capybara-brawl-game/actions) 都會自動在 Windows、macOS、Linux 上跑 `npm test`，
+並用 Chrome、Firefox、Safari（WebKit）實際連線玩一輪：兩人對戰、網路延遲時的移動、中途加入觀戰、滿房、斷線提示。
 
 伺服器開著的時候，還有幾個開發用的預覽頁：
 `/dev/sprites.html`（所有像素圖和整張地圖）、`/dev/renderer-preview.html`（戰鬥畫面）、`/dev/ui-preview.html?screen=lobby-host`（各個介面）。
