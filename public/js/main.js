@@ -150,6 +150,7 @@ function enterLobby() {
     input.setEnabled(false);
   }
   if (lobby) showLobby(lobby, myId, lobbyHandlers);
+  audio.music('menu');
 }
 
 // 兩種連線收到的訊息都用同一套處理；n 不是目前用的連線就不理（例如剛離開的單人模式）
@@ -168,6 +169,7 @@ function wire(n) {
   });
 
   on('start', (m) => {
+    audio.music('battle');
     game = new ClientGame({ info: m, myId, net, input, renderer, audio, ui });
     game.ping = ping;
     showGame(m, myId, { solo: net === soloNet });
@@ -189,6 +191,7 @@ function wire(n) {
 
   on('result', (m) => {
     if (!game) return;
+    audio.music(null); // 先停音樂，讓勝利 / 失敗的音效出來
     game.ended = true;
     input.setEnabled(false);
     showResult(m, myId);
@@ -211,6 +214,7 @@ function wire(n) {
     if (n !== net || !joined) return;
     game = null;
     input.setEnabled(false);
+    audio.music(null);
     showDisconnected(() => location.reload());
   };
 }
@@ -240,6 +244,7 @@ async function join(n, name) {
 }
 
 function showTitle() {
+  audio.music('menu'); // 第一次點畫面（聲音解鎖）之後才會真的開始播
   showJoin({
     defaultName: storage('capybrawl.name') || '',
     lan: LAN_SERVER,
