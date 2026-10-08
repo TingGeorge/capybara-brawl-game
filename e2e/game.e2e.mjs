@@ -586,6 +586,58 @@ test('有動態島的 iPhone 橫拿：畫面放大、地圖邊緣和自己不會
   noErrors(p);
 });
 
+test('背景音樂：點畫面後開始播，大廳和對戰換歌，靜音就停', { skip: BROWSER !== 'chromium' && '各瀏覽器的自動播放規則不同，只在 Chromium 量聲音' }, async (t) => {
+  const srv = await server();
+  t.after(() => srv.stop());
+  const p = await player(t, srv.url, '音樂', { join: false });
+  const { page } = p;
+  // 算有幾個聲音被播出來（音效和音樂都是即時合成的振盪器）
+  await page.addInitScript(() => {
+    window.__notes = 0;
+    const start = OscillatorNode.prototype.start;
+    OscillatorNode.prototype.start = function (...args) {
+      window.__notes++;
+      return start.apply(this, args);
+    };
+  });
+  await page.route('**/js/main.js', async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: `${await res.text()}\nwindow.__game = () => game;\nwindow.__audio = audio;\n` });
+  });
+  await page.reload();
+  const notesIn = async (ms) => {
+    const before = await page.evaluate(() => window.__notes);
+    await sleep(ms);
+    return (await page.evaluate(() => window.__notes)) - before;
+  };
+
+  // 還沒點過畫面：瀏覽器不准自動播放，所以一個聲音都沒有
+  assert.equal(await page.evaluate(() => window.__notes), 0);
+
+  // 點了之後：大廳播輕鬆的音樂
+  await page.fill('#join-name', '音樂');
+  await page.click('#solo-btn');
+  await waitScreen(page, 'screen-lobby');
+  await sleep(300);
+  assert.equal(await page.evaluate(() => window.__audio.song), 'menu');
+  assert.ok((await notesIn(1500)) >= 10, '大廳要有背景音樂');
+
+  // 開打：換成對戰的音樂
+  await page.click('#btn-start');
+  await waitPlaying(page);
+  assert.equal(await page.evaluate(() => window.__audio.song), 'battle');
+  assert.ok((await notesIn(1000)) >= 10, '對戰要有背景音樂');
+
+  // 按 M 靜音：音樂和音效都停，再按一次又有聲音
+  await page.keyboard.press('KeyM');
+  await sleep(300);
+  assert.equal(await page.evaluate(() => window.__audio.muted), true);
+  assert.equal(await notesIn(1000), 0, '靜音後不能再出聲');
+  await page.keyboard.press('KeyM');
+  assert.ok((await notesIn(1000)) >= 10, '取消靜音後音樂要繼續');
+  noErrors(p);
+});
+
 test('兩隻手指同時：一邊走一邊瞄準', { skip: BROWSER !== 'chromium' && '只有 Chromium 能用 CDP 模擬多指觸控' }, async (t) => {
   const srv = await server();
   t.after(() => srv.stop());

@@ -585,6 +585,8 @@ export class ClientGame {
   updateHUD(now, state) {
     const s = this.latest;
     const clock = s.ph === 'ended' ? s.cl : Math.max(0, s.cl - (now - this.latestAt) / 1000);
+    // 最後 30 秒背景音樂加快，比較緊張
+    this.audio.musicTempo(s.ph === 'playing' && clock <= 30 ? 1.15 : 1);
     if (s.ph === 'countdown') {
       const n = Math.ceil(clock);
       if (n !== this.lastBeep && n > 0) {

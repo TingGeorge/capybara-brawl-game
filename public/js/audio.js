@@ -1,4 +1,4 @@
-// 音效：全部用 Web Audio API 即時合成（不需要任何音效檔，離線也能用）
+// 音效和背景音樂：全部用 Web Audio API 即時合成（不需要任何音效檔，離線也能用）
 const STORE_KEY = 'capybara-brawl-muted';
 const MASTER_VOLUME = 0.6;
 const THROTTLE_MS = 40; // 同一種音效最快 40ms 播一次
@@ -250,18 +250,277 @@ const GAIN = {
   click: 2.4, splash: 1.5, bonk: 1.4,
 };
 
+
+// ---------- 背景音樂：即時合成的小樂團（主旋律、貝斯、分解和弦、鼓） ----------
+// 每首歌 = 和弦進行（一小節一個和弦）+ 主旋律（每格是一個八分音符）。
+// 主旋律的寫法：音名（C5、Bb4、G#5）= 彈一個新音；「.」= 上一個音繼續；「-」= 休息。
+
+const MUSIC_VOLUME = 0.6; // 背景音樂相對於音效的音量（比音效小聲一點）
+const NOTE_INDEX = { C: 0, D: 2, E: 4, F: 5, G: 7, A: 9, B: 11 };
+const CHORD_TYPES = { '': [0, 4, 7], m: [0, 3, 7] };
+
+function noteFreq(name) {
+  const m = /^([A-G])([#b]?)(\d)$/.exec(name);
+  if (!m) return 0;
+  const semi = NOTE_INDEX[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0) + (Number(m[3]) + 1) * 12;
+  return 440 * 2 ** ((semi - 69) / 12);
+}
+
+// 和弦名稱（F、Dm、Bb、G#m…）→ 根音的半音數和三個和弦音的半音距離
+function chordOf(name) {
+  const m = /^([A-G])([#b]?)(m?)$/.exec(name);
+  const root = NOTE_INDEX[m[1]] + (m[2] === '#' ? 1 : m[2] === 'b' ? -1 : 0);
+  return { root, tones: CHORD_TYPES[m[3]] };
+}
+
+const semiFreq = (semi) => 440 * 2 ** ((semi - 69) / 12);
+
+function tokens(text) {
+  return text.trim().split(/\s+/);
+}
+
+const SONGS = {
+  // 標題和大廳：輕鬆、蹦蹦跳跳（F 大調）
+  menu: {
+    bpm: 104,
+    style: 'calm',
+    chords: ['F', 'Dm', 'Bb', 'C', 'F', 'Dm', 'Gm', 'C'],
+    melody: tokens(`
+      C5 . A4 C5 F5 . E5 .    D5 . . . A4 . - -
+      Bb4 . D5 . C5 . Bb4 A4  G4 . . . - - C5 -
+      C5 . A4 C5 F5 . G5 .    A5 . G5 F5 D5 . - -
+      Bb4 . D5 . G5 . F5 E5   F5 . . . . . - -
+    `),
+  },
+  // 對戰：節奏快、有衝勁（A 小調），前半段主題、後半段比較緊張
+  battle: {
+    bpm: 140,
+    style: 'drive',
+    chords: ['Am', 'F', 'C', 'G', 'Am', 'F', 'G', 'E', 'F', 'G', 'Am', 'Am', 'F', 'G', 'E', 'E'],
+    melody: tokens(`
+      A4 . C5 . E5 . A5 .     G5 . F5 E5 F5 . C5 .
+      E5 . G5 . C6 . B5 A5    B5 . . . G5 . D5 .
+      A5 . E5 . A5 . C6 .     B5 A5 G5 . F5 . A5 .
+      G5 . F5 . E5 . D5 .     E5 . . . G#5 . B5 .
+      C5 . . . F5 . . .       D5 . . . G5 . . .
+      E5 . . . A5 . G5 .      E5 . . . - - - -
+      F5 . E5 . D5 . C5 .     D5 . E5 . F5 . G5 .
+      G#5 . . . B5 . . .      E5 . . . - - - -
+    `),
+  },
+};
+
+// 鼓的節奏（16 分音符一格）：k 大鼓、s 小鼓、h 鈸、- 空
+const DRUMS = {
+  calm: 'k - h - s - h - k - k h s - h -',
+  drive: 'k - h h s - h k k - h h s h h h',
+};
+
+let musicBus = null;
+let songGain = null;
+let song = null; // 正在播的歌
+let wantSong = null; // 想播的歌（聲音還沒解鎖時先記著）
+let songName = null;
+let musicTimer = 0;
+let step = 0;
+let nextStepAt = 0;
+let tempoScale = 1;
+
+function ensureMusicBus() {
+  if (musicBus || !ctx) return;
+  musicBus = ctx.createGain();
+  musicBus.gain.value = MUSIC_VOLUME;
+  musicBus.connect(master);
+}
+
+// 主旋律：方波 + 一點抖音，聽起來像紅白機
+function playLead(out, t, f, dur) {
+  tone(out, t, { type: 'square', f, dur: Math.max(0.08, dur), vol: 0.055, attack: 0.008, hold: Math.max(0, dur * 0.55), vib: dur > 0.3 ? f * 0.012 : 0, vibRate: 6 });
+}
+
+function playBass(out, t, f, dur) {
+  tone(out, t, { type: 'triangle', f, dur, vol: 0.2, attack: 0.006, hold: dur * 0.5 });
+}
+
+function playArp(out, t, f, dur) {
+  tone(out, t, { type: 'triangle', f, dur, vol: 0.05, attack: 0.004 });
+}
+
+function playDrum(out, t, kind) {
+  if (kind === 'k') {
+    tone(out, t, { type: 'sine', f: 150, f2: 45, dur: 0.14, vol: 0.4 });
+    tone(out, t, { type: 'triangle', f: 420, f2: 110, dur: 0.035, vol: 0.12 }); // 手機喇叭也聽得到的「咚」
+  }
+  else if (kind === 's') {
+    noise(out, t, { type: 'bandpass', f: 1900, q: 0.8, dur: 0.12, vol: 0.13 });
+    tone(out, t, { type: 'triangle', f: 220, f2: 140, dur: 0.07, vol: 0.06 });
+  } else if (kind === 'h') noise(out, t, { type: 'highpass', f: 7500, dur: 0.035, vol: 0.035 });
+}
+
+// 排一格（16 分音符）裡所有樂器的音
+function scheduleStep(sg, i, t, stepDur) {
+  const out = songGain;
+  const bar = Math.floor(i / 16) % sg.chords.length;
+  const pos = i % 16;
+  const chord = chordOf(sg.chords[bar]);
+
+  // 主旋律：偶數格才是八分音符的開頭
+  if (pos % 2 === 0) {
+    const k = (i / 2) % sg.melody.length;
+    const tok = sg.melody[k];
+    if (tok !== '.' && tok !== '-') {
+      let len = 1;
+      while (sg.melody[(k + len) % sg.melody.length] === '.' && len < 8) len++;
+      playLead(out, t, noteFreq(tok), len * 2 * stepDur * 0.92);
+    }
+  }
+
+  // 貝斯和分解和弦（貝斯放在第 3 個八度：手機喇叭放不出太低的音）
+  const root2 = 48 + chord.root;
+  if (sg.style === 'drive') {
+    if (pos % 2 === 0) playBass(out, t, semiFreq(root2 + (pos % 4 === 2 ? 12 : 0)), stepDur * 1.8);
+    playArp(out, t, semiFreq(60 + chord.root + chord.tones[pos % 3] + (pos >= 8 ? 12 : 0)), stepDur * 0.9);
+  } else {
+    if (pos % 4 === 0) playBass(out, t, semiFreq(root2 + [0, 7, 12, 7][pos / 4]), stepDur * 3.6);
+    if (pos % 2 === 0) playArp(out, t, semiFreq(60 + chord.root + chord.tones[(pos / 2) % 3]), stepDur * 1.8);
+  }
+
+  // 鼓
+  const drum = DRUMS[sg.style].split(' ')[pos];
+  if (drum !== '-') playDrum(out, t, drum);
+}
+
+// 往前排 0.15 秒的音，計時器偶爾晚到也不會掉拍
+function musicTick() {
+  if (!song || !ctx || ctx.state !== 'running') return;
+  const now = ctx.currentTime;
+  if (nextStepAt < now - 0.2) nextStepAt = now + 0.05; // 剛從背景回來：從現在重新開始
+  const total = song.chords.length * 16;
+  while (nextStepAt < now + 0.15) {
+    const stepDur = 60 / (song.bpm * tempoScale) / 4;
+    if (!muted) scheduleStep(song, step, nextStepAt, stepDur);
+    nextStepAt += stepDur;
+    step = (step + 1) % total;
+  }
+}
+
+function startSong(name) {
+  if (songName === name) return;
+  songName = name;
+  // 舊的歌淡出
+  if (songGain) {
+    const old = songGain;
+    try {
+      old.gain.setTargetAtTime(0.0001, ctx.currentTime, 0.15);
+    } catch {
+      // 忽略
+    }
+    setTimeout(() => old.disconnect(), 1200);
+    songGain = null;
+  }
+  song = name ? SONGS[name] : null;
+  clearInterval(musicTimer);
+  if (!song) return;
+  ensureMusicBus();
+  songGain = ctx.createGain();
+  songGain.gain.setValueAtTime(0.0001, ctx.currentTime);
+  songGain.gain.setTargetAtTime(1, ctx.currentTime, 0.3);
+  songGain.connect(musicBus);
+  step = 0;
+  tempoScale = 1;
+  nextStepAt = ctx.currentTime + 0.1;
+  musicTick();
+  musicTimer = setInterval(musicTick, 50);
+}
+
+// 聲音解鎖後才真的開始播
+function syncMusic() {
+  if (ctx && ctx.state === 'running' && wantSong !== songName) startSong(wantSong);
+}
+
+// iPhone 靜音開關打開時，網頁的聲音預設會被關掉；遊戲比照音樂 App，開關打開也照樣有聲音
+// （想安靜可以按遊戲裡的「靜音」）。iOS 16.4 以上用 audioSession，舊版用一段無聲的 <audio> 當媒體播放
+let silentAudio = null;
+function playThroughSilentSwitch() {
+  try {
+    if (navigator.audioSession) {
+      navigator.audioSession.type = 'playback';
+      return;
+    }
+    const iOS = /iP(hone|ad|od)/.test(navigator.platform) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+    if (!iOS || silentAudio) return;
+    // 0.5 秒的無聲 WAV（8kHz、8-bit）
+    const n = 4000;
+    const bytes = new Uint8Array(44 + n);
+    const v = new DataView(bytes.buffer);
+    const str = (o, text) => [...text].forEach((c, i) => v.setUint8(o + i, c.charCodeAt(0)));
+    str(0, 'RIFF');
+    v.setUint32(4, 36 + n, true);
+    str(8, 'WAVEfmt ');
+    v.setUint32(16, 16, true);
+    v.setUint16(20, 1, true);
+    v.setUint16(22, 1, true);
+    v.setUint32(24, 8000, true);
+    v.setUint32(28, 8000, true);
+    v.setUint16(32, 1, true);
+    v.setUint16(34, 8, true);
+    str(36, 'data');
+    v.setUint32(40, n, true);
+    bytes.fill(128, 44);
+    let bin = '';
+    for (const b of bytes) bin += String.fromCharCode(b);
+    silentAudio = new Audio(`data:audio/wav;base64,${btoa(bin)}`);
+    silentAudio.loop = true;
+    silentAudio.setAttribute('playsinline', '');
+    const p = silentAudio.play();
+    if (p && p.catch) p.catch(() => {});
+  } catch {
+    // 不支援就算了
+  }
+}
+
+// 切到別的 App 或關螢幕時暫停聲音（省電），回來再繼續；iPhone 被來電、Siri 打斷後也在這裡恢復
+document.addEventListener('visibilitychange', () => {
+  if (!ctx) return;
+  try {
+    if (document.hidden) ctx.suspend().catch(() => {});
+    else ctx.resume().then(syncMusic, () => {});
+  } catch {
+    // 忽略
+  }
+});
+
 export const audio = {
-  // 第一次點擊或按鍵時呼叫：建立 / 喚醒 AudioContext
+  // 每次點擊或按鍵時呼叫：建立 / 喚醒 AudioContext（iPhone 被打斷後的 interrupted 狀態也要喚醒）
   unlock() {
     try {
       const c = ensureCtx();
-      if (c && c.state === 'suspended') {
+      if (!c) return;
+      playThroughSilentSwitch();
+      if (c.state !== 'running') {
         const p = c.resume();
-        if (p && p.catch) p.catch(() => {});
+        if (p && p.then) p.then(syncMusic, () => {});
+      } else {
+        syncMusic();
       }
     } catch {
       // 不支援就安靜
     }
+  },
+
+  // 背景音樂：'menu'（標題、大廳）、'battle'（對戰）、null（停）。聲音還沒解鎖的話，解鎖後自動開始
+  music(name) {
+    wantSong = name && SONGS[name] ? name : null;
+    try {
+      syncMusic();
+    } catch {
+      // 音樂失敗不能影響遊戲
+    }
+  },
+
+  // 最後 30 秒音樂加快
+  musicTempo(scale) {
+    tempoScale = scale > 0 ? scale : 1;
   },
 
   play(name, opts) {
@@ -319,5 +578,10 @@ export const audio = {
 
   get muted() {
     return muted;
+  },
+
+  // 正在播的背景音樂（'menu'、'battle' 或 null）
+  get song() {
+    return songName;
   },
 };
