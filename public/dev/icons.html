@@ -1,0 +1,244 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<title>App 圖示預覽</title>
+<style>
+  body { margin: 0; padding: 16px; background: #2b2420; color: #f4ead0; font: 14px "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif; }
+  h2 { margin: 18px 0 8px; font-size: 16px; }
+  p { max-width: 640px; line-height: 1.6; }
+  code { background: #1a1411; padding: 1px 5px; border-radius: 3px; }
+  .row { display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-end; }
+  .card { background: #3d342d; padding: 10px; border-radius: 6px; text-align: center; }
+  .card canvas { display: block; margin: 0 auto 6px; image-rendering: pixelated; background:
+    repeating-conic-gradient(#555 0 25%, #777 0 50%) 0 0 / 16px 16px; }
+  .card span { display: block; font-size: 12px; margin-bottom: 4px; }
+  .card a { color: #ffd34d; font-size: 12px; }
+  /* 用圓形遮罩模擬 Android 把 maskable 圖示裁成圓形 */
+  .circle canvas { border-radius: 50%; }
+</style>
+</head>
+<body>
+<h2>App 圖示（安裝到主畫面、瀏覽器分頁用）</h2>
+<p>
+  這頁是開發用的：圖示全部用遊戲自己的 <code>drawPortrait</code> 即時畫出來，再存成 PNG 放在 <code>public/icons/</code>。
+  想改圖示的話，改這個檔案，執行 <code>node server/index.js</code> 後打開這一頁，
+  按每張圖下面的「下載」存檔覆蓋 <code>public/icons/</code> 裡的同名檔案就好
+  （要用程式一次存起來，可以呼叫 <code>window.renderIcons()</code>，它會回傳 <code>{ '檔名': dataURL }</code>）。
+</p>
+<div class="row" id="icons"></div>
+<h2>maskable 圖示被裁成圓形的樣子</h2>
+<div class="row circle" id="circles"></div>
+<script type="module">
+import { drawPortrait } from '/js/sprites.js';
+
+// 顏色跟 style.css 的 :root 一致
+const C = {
+  ink: '#0b0e22',
+  bg: '#141a36',
+  rayB: '#19214a',
+  ring1: '#1d2552',
+  ring2: '#232b5a',
+  ring3: '#2e3a7a',
+  gold: '#ffd34d',
+  goldD: '#d9971c',
+  goldL: '#fff3b0',
+  grassL: '#8fd16a',
+  grass: '#5f9e4b',
+  grassD: '#3f7d34',
+};
+
+// kind：
+//   tile     一般圖示（purpose any），四個角削掉，周圍有金色粗框
+//   square   iOS 主畫面圖示：不透明、整張鋪滿（角落交給 iOS 裁），金框往內縮
+//   bleed    maskable：整張鋪滿、不畫框，重點都放在中間 80% 的安全圓裡
+//   mini     分頁小圖示：只留 1 像素金框，頭像放大 2 倍後只裁出水豚的臉
+// size：邊長；u：背景一格有幾個像素；s：水豚頭像放大幾倍
+const SPECS = [
+  { name: 'icon-192.png', size: 192, u: 3, s: 5, kind: 'tile', note: '192×192 · any' },
+  { name: 'icon-512.png', size: 512, u: 8, s: 14, kind: 'tile', note: '512×512 · any' },
+  { name: 'icon-maskable-512.png', size: 512, u: 8, s: 11, kind: 'bleed', note: '512×512 · maskable' },
+  { name: 'apple-touch-icon.png', size: 180, u: 3, s: 5, kind: 'square', note: '180×180 · iOS' },
+  { name: 'favicon-32.png', size: 32, u: 1, s: 2, kind: 'mini', note: '32×32 · 分頁' },
+];
+
+function makeIcon({ size, u, s, kind }) {
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = size;
+  const g = cv.getContext('2d');
+  g.imageSmoothingEnabled = false;
+  const N = Math.ceil(size / u); // 一邊有幾格
+  const k = N / 64; // 64 格版面的比例尺
+  const at = (n) => Math.max(1, Math.round(n * k)); // 以 64 格為準的長度，換成實際格數
+  const mid = N / 2;
+
+  // 先把每一格的顏色記在 grid 裡，最後再一次畫出來
+  const grid = new Array(N * N).fill(null);
+  const inner = new Array(N * N).fill(false); // 框裡面可以畫背景花紋的格子
+  const cell = (x, y, col) => {
+    if (x >= 0 && y >= 0 && x < N && y < N) grid[y * N + x] = col;
+  };
+
+  // 畫一個四角削成階梯的方塊（格數座標，x1、y1 不含）
+  function block(x0, y0, x1, y1, r, col) {
+    for (let y = y0; y < y1; y++) {
+      for (let x = x0; x < x1; x++) {
+        const dx = Math.max(x0 + r - (x + 0.5), x + 0.5 - (x1 - r), 0);
+        const dy = Math.max(y0 + r - (y + 0.5), y + 0.5 - (y1 - r), 0);
+        if (dx * dx + dy * dy <= r * r) {
+          cell(x, y, col);
+          inner[y * N + x] = col === C.bg;
+        }
+      }
+    }
+  }
+
+  // ---- 底色與金框 ----
+  if (kind === 'mini') {
+    // 只有 32 像素，框只畫 1 像素的金色
+    block(0, 0, N, N, 2, C.gold);
+    block(1, 1, N - 1, N - 1, 1, C.bg);
+  } else if (kind === 'tile' || kind === 'square') {
+    const inset = kind === 'square' ? at(2) : 0; // iOS 會自己裁角，框要往內縮才不會被切到
+    const R = kind === 'square' ? at(7) : at(9);
+    if (kind === 'square') block(0, 0, N, N, 0, C.bg);
+    const ink = at(1);
+    const bevel = at(1);
+    const w = ink + at(kind === 'square' ? 2 : 3);
+    const iw = w + ink;
+    const E = N - inset;
+    block(inset, inset, E, E, R, C.ink); // 最外面的深色邊
+    block(inset + ink, inset + ink, E - ink, E - ink, R - ink, C.goldD); // 金框（暗面）
+    block(inset + ink, inset + ink, E - ink - bevel, E - ink - bevel, R - ink - 1, C.gold); // 金框（亮面）
+    block(inset + w, inset + w, E - w, E - w, Math.max(1, R - w), C.ink); // 框內的深色線
+    block(inset + iw, inset + iw, E - iw, E - iw, Math.max(1, R - iw), C.bg);
+  } else {
+    block(0, 0, N, N, 0, C.bg);
+  }
+
+  // ---- 背景：放射光線 + 一圈圈的光暈（只畫在框裡面）----
+  if (kind !== 'mini') {
+    const rays = 16;
+    const rings = [[at(27), C.ring1], [at(21), C.ring2], [at(15), C.ring3]];
+    for (let y = 0; y < N; y++) {
+      for (let x = 0; x < N; x++) {
+        if (!inner[y * N + x]) continue;
+        const dx = x + 0.5 - mid;
+        const dy = y + 0.5 - mid;
+        const idx = Math.floor(((Math.atan2(dy, dx) + Math.PI) / (Math.PI * 2)) * rays);
+        if (idx % 2 === 1) cell(x, y, C.rayB);
+        for (const [r, col] of rings) {
+          if (dx * dx + dy * dy <= r * r) cell(x, y, col);
+        }
+      }
+    }
+    // 四角星星
+    const arm = Math.max(1, Math.round(2 * k));
+    const spots = kind === 'bleed'
+      ? [[-17, -17, 1], [18, -14, 1], [17, 17, 0]]
+      : [[-20, -19, 1], [20, -17, 1], [21, 22, 0], [-22, 21, 0]];
+    for (const [dx, dy, big] of spots) {
+      const sx = Math.round(mid + dx * k);
+      const sy = Math.round(mid + dy * k);
+      const a = big ? arm : Math.max(1, arm - 1);
+      if (!inner[(sy - a) * N + sx - a] || !inner[(sy + a) * N + sx + a]) continue;
+      cell(sx, sy, C.goldL);
+      for (let i = 1; i <= a; i++) {
+        const col = i === 1 || !big ? C.gold : C.goldD;
+        cell(sx - i, sy, col);
+        cell(sx + i, sy, col);
+        cell(sx, sy - i, col);
+        cell(sx, sy + i, col);
+      }
+    }
+  }
+
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const col = grid[y * N + x];
+      if (!col) continue;
+      g.fillStyle = col;
+      g.fillRect(x * u, y * u, u, u);
+    }
+  }
+
+  // ---- 水豚（胡蘿蔔那隻）----
+  const tmp = document.createElement('canvas');
+  drawPortrait(tmp, 'carrot', s);
+
+  if (kind === 'mini') {
+    // 小圖示：只留水豚的臉（原圖第 10~25 欄、第 4~19 列），再放大 2 倍
+    g.drawImage(tmp, 10 * s, 4 * s, 15 * s, 15 * s, 1, 1, 30, 30);
+    return cv;
+  }
+
+  const px = Math.round((size - tmp.width) / 2);
+  const py = Math.round((size - tmp.height) / 2) - Math.round(size * 0.015);
+
+  // 腳下的一小塊草地（跟遊戲地圖同一種綠色），排在頭像後面
+  const gx = px + 11.5 * s;
+  const gy = py + 19 * s;
+  const rx = 13 * s;
+  const ry = 2.6 * s;
+  const rim = Math.max(0.12, (u * 1.2) / ry); // 外圈一格的邊
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      if (!inner[y * N + x]) continue;
+      const nx = ((x + 0.5) * u - gx) / rx;
+      const ny = ((y + 0.5) * u - gy) / ry;
+      const d = nx * nx + ny * ny;
+      if (d > 1) continue;
+      const edge = d > (1 - rim) * (1 - rim);
+      g.fillStyle = edge && ny > 0 ? C.grassD : ny < -0.25 ? C.grassL : ny > 0.35 ? C.grassD : C.grass;
+      g.fillRect(x * u, y * u, u, u);
+    }
+  }
+
+  g.drawImage(tmp, px, py);
+  return cv;
+}
+
+const rowIcons = document.getElementById('icons');
+const rowCircles = document.getElementById('circles');
+const canvases = {};
+
+for (const spec of SPECS) {
+  const cv = makeIcon(spec);
+  canvases[spec.name] = cv;
+  const card = document.createElement('div');
+  card.className = 'card';
+  const label = document.createElement('span');
+  label.textContent = `${spec.name}（${spec.note}）`;
+  const a = document.createElement('a');
+  a.textContent = '下載';
+  a.download = spec.name;
+  a.href = cv.toDataURL('image/png');
+  // 預覽時最多放大到 256 像素寬，小圖就整數倍放大
+  const shown = cv.cloneNode();
+  shown.getContext('2d').drawImage(cv, 0, 0);
+  const zoom = cv.width >= 180 ? 1 : 6;
+  shown.style.width = `${Math.min(256, cv.width * zoom)}px`;
+  shown.style.height = shown.style.width;
+  card.append(label, shown, a);
+  rowIcons.append(card);
+  if (spec.kind === 'bleed') {
+    const c2 = cv.cloneNode();
+    c2.getContext('2d').drawImage(cv, 0, 0);
+    c2.style.width = c2.style.height = '200px';
+    const d = document.createElement('div');
+    d.className = 'card';
+    d.append(c2);
+    rowCircles.append(d);
+  }
+}
+
+// 給腳本用：回傳 { '檔名': 'data:image/png;base64,…' }
+window.renderIcons = () => {
+  const out = {};
+  for (const spec of SPECS) out[spec.name] = canvases[spec.name].toDataURL('image/png');
+  return out;
+};
+window.done = true;
+</script>
+</body>
+</html>

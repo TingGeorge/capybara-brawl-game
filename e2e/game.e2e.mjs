@@ -4,10 +4,13 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import http from 'node:http';
+import os from 'node:os';
 import path from 'node:path';
 import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import { startServer } from '../server/index.js';
+import { buildStatic } from '../scripts/build-static.mjs';
 
 const require = createRequire(import.meta.url);
 const playwright = require('playwright');
@@ -35,8 +38,9 @@ async function server(options = {}) {
 }
 
 // 開一個玩家的瀏覽器分頁。會把 main.js 裡的 game 物件露出來給測試讀（不影響遊戲本身）
-async function player(t, url, name, { join = true, latency = 0 } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 } });
+// context 可以換掉瀏覽器環境（例如手機的螢幕大小和觸控）
+async function player(t, url, name, { join = true, latency = 0, context = {} } = {}) {
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, ...context });
   const page = await ctx.newPage();
   const errors = [];
   page.on('console', (m) => {
@@ -289,4 +293,409 @@ test('伺服器關掉時，畫面會提示連線中斷', async (t) => {
   const a = await player(t, srv.url, '斷線');
   srv.stop();
   await waitScreen(a.page, 'screen-disconnected');
+});
+
+// ---------------------------------------------------------------------------
+// 手機（觸控）和純靜態網站（GitHub Pages）
+// 手機測試一律用 tap / 觸控事件；用 click() 會變成滑鼠，遊戲會切回滑鼠模式把觸控按鈕藏起來。
+
+// 手機的瀏覽器環境。isMobile 在 Firefox 不支援，其他兩種才傳
+const phoneContext = (width, height) => ({
+  viewport: { width, height },
+  hasTouch: true,
+  deviceScaleFactor: 2,
+  ...(BROWSER === 'firefox' ? {} : { isMobile: true }),
+});
+
+// 在某個元素上送出一個模擬的手指事件（pointerType: touch）。
+// 遊戲的觸控程式聽的是 pointer 事件；多指時每根手指用不同的 id
+function pointer(page, selector, type, id, x, y) {
+  return page.evaluate(([sel, kind, pid, cx, cy]) => {
+    document.querySelector(sel).dispatchEvent(new PointerEvent(kind, {
+      pointerId: pid, pointerType: 'touch', isPrimary: true, clientX: cx, clientY: cy, bubbles: true, cancelable: true,
+    }));
+  }, [selector, type, id, x, y]);
+}
+
+async function centerOf(page, selector) {
+  const box = await page.locator(selector).boundingBox();
+  assert.ok(box, `${selector} 要看得到`);
+  return { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+}
+
+// 標題畫面 → 單人大廳 → 開打（全部用手指點）
+async function soloLobby(page, name) {
+  await page.fill('#join-name', name);
+  await page.tap('#solo-btn');
+  await waitScreen(page, 'screen-lobby');
+}
+
+async function soloMatch(page, name) {
+  await soloLobby(page, name);
+  await page.tap('#btn-start');
+  await waitScreen(page, 'hud');
+}
+
+// 記下遊戲送出去的攻擊 / 大招訊息（window.__sent），可以檢查瞄準的角度
+function recordShots(page) {
+  return page.evaluate(() => {
+    const g = window.__game();
+    const send = g.net.send.bind(g.net);
+    window.__sent = [];
+    g.net.send = (o) => {
+      if (o.t === 'atk' || o.t === 'sup') window.__sent.push(o);
+      send(o);
+    };
+  });
+}
+
+const waitShots = (page, n) => page.waitForFunction((count) => window.__sent.length >= count, n, { timeout: 5000 });
+
+// 畫面上有沒有橫向超出螢幕的東西
+function overflowOf(page) {
+  return page.evaluate(() => {
+    const bad = [];
+    const doc = document.scrollingElement;
+    if (doc.scrollWidth > innerWidth) bad.push(`整個頁面 scrollWidth ${doc.scrollWidth} > ${innerWidth}`);
+    for (const s of document.querySelectorAll('.screen')) {
+      if (!s.hidden && s.scrollWidth > s.clientWidth) bad.push(`#${s.id} scrollWidth ${s.scrollWidth} > clientWidth ${s.clientWidth}`);
+    }
+    return bad;
+  });
+}
+
+test('手機橫拿：單人模式用手指玩', async (t) => {
+  const srv = await server();
+  t.after(() => srv.stop());
+  const p = await player(t, srv.url, '手機', { join: false, context: phoneContext(844, 390) });
+  const { page } = p;
+
+  // 標題 → 單人大廳
+  assert.equal(await page.isVisible('#join-btn'), true, '有伺服器的時候也要能連線對戰');
+  assert.equal(await page.isVisible('#solo-btn'), true);
+  await soloLobby(page, '手機');
+  assert.equal(await page.isVisible('#btn-leave'), true);
+  assert.equal(await page.isVisible('#bots-label'), false, '單人模式不用勾電腦補位');
+  assert.match(await page.textContent('#share-urls'), /單人模式/);
+  assert.equal(await page.evaluate(() => document.body.classList.contains('touch')), true, '用手指點之後要是觸控模式');
+  await page.locator('#char-grid').getByText('蘿蔔丁', { exact: true }).first().tap();
+
+  // 開打：觸控按鈕要出現
+  await page.tap('#btn-start');
+  await waitScreen(page, 'hud');
+  for (const sel of ['#touch-ui', '#touch-zone', '#touch-attack', '#hud-super', '#hud-btn-score', '#hud-btn-mute', '#hud-btn-leave']) {
+    assert.equal(await page.isVisible(sel), true, `${sel} 在手機上要看得到`);
+  }
+  await waitPlaying(page);
+  await recordShots(page);
+
+  // 手指實際點得到的是搖桿區和攻擊鈕，沒有被別的東西蓋住
+  const zone = await page.locator('#touch-zone').boundingBox();
+  const start = { x: zone.x + zone.width * 0.3, y: zone.y + zone.height * 0.6 };
+  const atk = await centerOf(page, '#touch-attack');
+  assert.equal(await page.evaluate(([x, y]) => document.elementFromPoint(x, y).id, [start.x, start.y]), 'touch-zone');
+  assert.equal(await page.evaluate(([x, y]) => !!document.elementFromPoint(x, y).closest('#touch-attack'), [atk.x, atk.y]), true);
+
+  // 搖桿往右推 0.8 秒：畫面和伺服器上的位置都要往右移動
+  const before = await myState(page);
+  await pointer(page, '#touch-zone', 'pointerdown', 7, start.x, start.y);
+  for (let i = 1; i <= 5; i++) {
+    await pointer(page, '#touch-zone', 'pointermove', 7, start.x + i * 16, start.y);
+    await sleep(20);
+  }
+  await sleep(800);
+  const held = await page.evaluate(() => ({
+    x: window.__game().input.stickX,
+    y: window.__game().input.stickY,
+    active: document.querySelector('#touch-stick').classList.contains('active'),
+  }));
+  assert.ok(held.active, '按住時搖桿要亮起來');
+  assert.ok(held.x > 0.99 && Math.abs(held.y) < 0.01, `搖桿要指向右邊：${held.x}, ${held.y}`);
+  await pointer(page, '#touch-zone', 'pointerup', 7, start.x + 80, start.y);
+  await sleep(400);
+  const moved = await myState(page);
+  assert.ok(moved.x - before.x > 20, `畫面上要往右移動：${before.x} → ${moved.x}`);
+  assert.ok(moved.sx - before.sx > 20, `伺服器上要往右移動：${before.sx} → ${moved.sx}`);
+  assert.ok(Math.abs(moved.x - moved.sx) < 1, `停下來後畫面和伺服器的位置要一致：${moved.x} vs ${moved.sx}`);
+  assert.equal(await page.evaluate(() => window.__game().input.stickX), 0, '放開後搖桿要歸零');
+
+  // 點一下攻擊鈕（真的觸控點擊）：自動瞄準並開槍，彈藥減少
+  assert.ok(moved.ammo > 2.9, `開槍前彈藥應該是滿的：${moved.ammo}`);
+  await page.touchscreen.tap(atk.x, atk.y);
+  await waitShots(page, 1);
+  await page.waitForFunction(() => window.__game().mySnap.am < 2.9, null, { timeout: 3000 });
+
+  // 拖曳攻擊鈕往正上方瞄準：瞄準線指向上方，放開才發射
+  await sleep(600);
+  const ammoBefore = (await myState(page)).ammo;
+  await pointer(page, '#touch-attack', 'pointerdown', 9, atk.x, atk.y);
+  await pointer(page, '#touch-attack', 'pointermove', 9, atk.x, atk.y - 70);
+  await sleep(150);
+  const aiming = await page.evaluate(() => ({ aim: window.__game().aim, touchAim: window.__game().input.touchAim, sent: window.__sent.length }));
+  assert.ok(Math.abs(aiming.aim + Math.PI / 2) < 0.05, `要瞄準正上方（-π/2）：${aiming.aim}`);
+  assert.ok(aiming.touchAim && !aiming.touchAim.super);
+  assert.equal(aiming.sent, 1, '還沒放開，不能發射');
+  await pointer(page, '#touch-attack', 'pointerup', 9, atk.x, atk.y - 70);
+  await waitShots(page, 2);
+  const shot = await page.evaluate(() => window.__sent[1]);
+  assert.equal(shot.t, 'atk');
+  assert.ok(Math.abs(shot.a + Math.PI / 2) < 0.05, `發射的角度要是正上方：${shot.a}`);
+  await page.waitForFunction((a) => window.__game().mySnap.am < a - 0.5, ammoBefore, { timeout: 3000 });
+  assert.equal(await page.evaluate(() => window.__game().input.touchAim), null, '放開後要清掉瞄準');
+
+  // 計分板按鈕：點一下打開、再點一下關起來
+  await page.tap('#hud-btn-score');
+  await page.locator('#scoreboard').waitFor({ state: 'visible', timeout: 3000 });
+  await page.tap('#hud-btn-score');
+  await page.locator('#scoreboard').waitFor({ state: 'hidden', timeout: 3000 });
+
+  // 離開：要連點兩次才會離開
+  await page.tap('#hud-btn-leave');
+  assert.equal(await screenOf(page), 'hud', '只點一次不能離開');
+  assert.match(await page.textContent('#hud-btn-leave'), /再按一次/);
+  await page.tap('#hud-btn-leave');
+  await waitScreen(page, 'screen-join', 5000);
+  noErrors(p);
+});
+
+test('手機直拿：版面不會超出螢幕', async (t) => {
+  const srv = await server();
+  t.after(() => srv.stop());
+  const p = await player(t, srv.url, '直拿', { join: false, context: phoneContext(390, 844) });
+  const { page } = p;
+  const noOverflow = async (what) => {
+    await sleep(300);
+    assert.deepEqual(await overflowOf(page), [], `${what}：有東西橫向超出螢幕`);
+  };
+
+  await noOverflow('標題畫面');
+  await soloLobby(page, '直拿');
+  await noOverflow('大廳');
+
+  // 一欄式的大廳可以往下捲，但「開始對戰」一定要捲得到、而且完整在螢幕內
+  const startBtn = page.locator('#btn-start');
+  await startBtn.scrollIntoViewIfNeeded();
+  assert.equal(await startBtn.isVisible(), true);
+  const box = await startBtn.boundingBox();
+  const view = page.viewportSize();
+  assert.ok(box.x >= 0 && box.x + box.width <= view.width, `按鈕左右要在螢幕內：${JSON.stringify(box)}`);
+  assert.ok(box.y >= 0 && box.y + box.height <= view.height, `按鈕上下要在螢幕內：${JSON.stringify(box)}`);
+  await noOverflow('大廳（捲到最下面）');
+
+  await startBtn.tap();
+  await waitScreen(page, 'hud');
+  await noOverflow('對戰畫面');
+  noErrors(p);
+});
+
+test('兩隻手指同時：一邊走一邊瞄準', { skip: BROWSER !== 'chromium' && '只有 Chromium 能用 CDP 模擬多指觸控' }, async (t) => {
+  const srv = await server();
+  t.after(() => srv.stop());
+  const p = await player(t, srv.url, '雙指', { join: false, context: phoneContext(844, 390) });
+  const { page } = p;
+  await soloMatch(page, '雙指');
+  await waitPlaying(page);
+  await recordShots(page);
+
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type, points) => cdp.send('Input.dispatchTouchEvent', { type, touchPoints: points });
+  const zone = await page.locator('#touch-zone').boundingBox();
+  const atk = await centerOf(page, '#touch-attack');
+  const left = { x: zone.x + zone.width * 0.3, y: zone.y + zone.height * 0.6, id: 1 };
+  const right = { x: atk.x, y: atk.y, id: 2 };
+
+  const before = await myState(page);
+  // 左手指放下、往右拖；右手指再放到攻擊鈕上、往上拖
+  await touch('touchStart', [left]);
+  await touch('touchMove', [{ ...left, x: left.x + 80 }]);
+  await touch('touchStart', [{ ...left, x: left.x + 80 }, right]);
+  await touch('touchMove', [{ ...left, x: left.x + 80 }, { ...right, y: right.y - 70 }]);
+  await sleep(800);
+
+  const both = await page.evaluate(() => {
+    const g = window.__game();
+    return { stickX: g.input.stickX, stickY: g.input.stickY, touchAim: g.input.touchAim, sent: window.__sent.length, mode: g.input.mode };
+  });
+  assert.equal(both.mode, 'touch');
+  assert.ok(both.stickX > 0.99, `左手指要讓角色往右走：${both.stickX}`);
+  assert.ok(both.touchAim && Math.abs(both.touchAim.angle + Math.PI / 2) < 0.05, `右手指要瞄準正上方：${JSON.stringify(both.touchAim)}`);
+  assert.equal(both.sent, 0, '右手指還沒放開，不能發射');
+  const walking = await myState(page);
+  assert.ok(walking.x - before.x > 20, `邊瞄準邊往右走：${before.x} → ${walking.x}`);
+
+  // 先放開左手指（touchEnd 的 touchPoints 是「要放開的那幾根」）：停止移動，但右手指還在瞄準
+  await touch('touchEnd', [{ ...left, x: left.x + 80 }]);
+  await sleep(150);
+  const aimOnly = await page.evaluate(() => ({ stickX: window.__game().input.stickX, touchAim: window.__game().input.touchAim }));
+  assert.equal(aimOnly.stickX, 0, '左手指放開後要停下來');
+  assert.ok(aimOnly.touchAim, '右手指還在瞄準');
+
+  // 再放開右手指：發射
+  await touch('touchEnd', [{ ...right, y: right.y - 70 }]);
+  await waitShots(page, 1);
+  const shot = await page.evaluate(() => window.__sent[0]);
+  assert.equal(shot.t, 'atk');
+  assert.ok(Math.abs(shot.a + Math.PI / 2) < 0.05, `發射的角度要是正上方：${shot.a}`);
+  await page.waitForFunction(() => window.__game().mySnap.am < 2.9, null, { timeout: 3000 });
+  noErrors(p);
+});
+
+// ---------------------------------------------------------------------------
+// 純靜態網站：用 scripts/build-static.mjs 整理出和 GitHub Pages 一樣的檔案，放在子路徑底下提供
+
+const SITE_BASE = '/capybara-brawl-game/';
+const MIME = {
+  '.html': 'text/html; charset=utf-8',
+  '.js': 'text/javascript; charset=utf-8',
+  '.css': 'text/css; charset=utf-8',
+  '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json',
+  '.png': 'image/png',
+};
+
+// 只認 /capybara-brawl-game/ 底下的檔案，其他路徑一律 404（用來證明所有網址都是相對路徑）
+async function staticSite(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'capybrawl-site-'));
+  buildStatic(root);
+  const outside = []; // 跑到子路徑外面的請求
+  const srv = http.createServer((req, res) => {
+    let pathname;
+    try {
+      pathname = decodeURIComponent(new URL(req.url, 'http://localhost').pathname);
+    } catch {
+      res.writeHead(400).end();
+      return;
+    }
+    if (pathname === SITE_BASE.slice(0, -1)) {
+      res.writeHead(301, { Location: SITE_BASE }).end();
+      return;
+    }
+    if (!pathname.startsWith(SITE_BASE)) {
+      outside.push(pathname);
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('not found');
+      return;
+    }
+    let rel = pathname.slice(SITE_BASE.length);
+    if (!rel || rel.endsWith('/')) rel += 'index.html';
+    const file = path.join(root, path.normalize(rel));
+    if (!file.startsWith(root + path.sep)) {
+      res.writeHead(403).end();
+      return;
+    }
+    fs.readFile(file, (err, data) => {
+      if (err) {
+        res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' }).end('not found');
+        return;
+      }
+      res.writeHead(200, { 'Content-Type': MIME[path.extname(file)] || 'application/octet-stream' });
+      res.end(data);
+    });
+  });
+  await new Promise((r) => srv.listen(0, '127.0.0.1', r));
+  t.after(() => {
+    srv.closeAllConnections?.();
+    srv.close();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+  const origin = `http://127.0.0.1:${srv.address().port}`;
+  return { origin, url: origin + SITE_BASE, root, outside };
+}
+
+test('靜態網站（GitHub Pages）：放在子路徑也能用，只有單人模式', async (t) => {
+  const site = await staticSite(t);
+  // 先開空白頁、掛好請求記錄，再載入網站，這樣第一次載入的請求（包含 service worker 抓的檔案）也記得到
+  const p = await player(t, 'about:blank', '靜態', { join: false, context: phoneContext(844, 390) });
+  const { page } = p;
+  const requests = [];
+  page.context().on('request', (r) => requests.push(r.url()));
+  await page.goto(site.url);
+
+  // 沒有伺服器：沒有「連線對戰」，單人是主要按鈕
+  await page.locator('#solo-btn').waitFor({ state: 'visible' });
+  assert.equal(await page.isVisible('#join-btn'), false, '靜態網站不能連線對戰');
+  assert.match(await page.textContent('#solo-btn'), /和電腦打/);
+  assert.equal(await page.evaluate(() => document.body.dataset.screen), 'screen-join');
+
+  await soloMatch(page, '靜態');
+  assert.equal(await page.isVisible('#touch-attack'), true);
+  await waitPlaying(page);
+
+  // 載入的每個檔案都在子路徑底下，沒有任何一個請求打到網站根目錄
+  assert.deepEqual(site.outside, [], '網站伺服器收到子路徑以外的請求');
+  const stray = requests.filter((u) => /^https?:/.test(u) && !u.startsWith(site.url));
+  assert.deepEqual(stray, [], '有請求跑到子路徑以外的地方');
+  assert.ok(requests.some((u) => u === `${site.url}shared/lobby.js`), '共用的程式碼要從 shared/ 載入');
+  assert.ok(requests.some((u) => u === `${site.url}js/local-net.js`));
+  assert.equal(requests.some((u) => u.includes('/ws')), false, '單人模式不能連 WebSocket');
+  noErrors(p);
+});
+
+const hasPwaFiles = ['manifest.webmanifest', 'sw.js', 'icons/icon-192.png', 'icons/icon-512.png']
+  .every((f) => fs.existsSync(path.join(path.dirname(fileURLToPath(import.meta.url)), '..', 'public', f)));
+
+test('安裝成 App：manifest 和圖示都正確，離線也能玩單人模式', {
+  skip: (BROWSER !== 'chromium' && '只有 Chromium 的 Playwright 支援 service worker')
+    || (!hasPwaFiles && '還沒有 manifest.webmanifest / sw.js / icons'),
+}, async (t) => {
+  const site = await staticSite(t);
+  const ctx = await browser.newContext({ ...phoneContext(844, 390), serviceWorkers: 'allow' });
+  t.after(() => ctx.close());
+  const page = await ctx.newPage();
+  const errors = [];
+  page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
+  page.on('pageerror', (e) => errors.push(e.message));
+  await page.goto(site.url);
+
+  // manifest：讀得到、能解析，每個圖示都載得到
+  const manifest = await page.evaluate(async () => {
+    const href = document.querySelector('link[rel="manifest"]').href;
+    const res = await fetch(href);
+    const json = await res.json();
+    const icons = [];
+    for (const icon of json.icons) {
+      const r = await fetch(new URL(icon.src, href));
+      icons.push({ src: icon.src, sizes: icon.sizes, purpose: icon.purpose, status: r.status, type: r.headers.get('content-type'), bytes: (await r.blob()).size });
+    }
+    const links = [];
+    for (const l of document.querySelectorAll('link[rel="icon"], link[rel="apple-touch-icon"]')) {
+      links.push({ href: l.getAttribute('href'), status: (await fetch(l.href)).status });
+    }
+    return { href, status: res.status, json, icons, links };
+  });
+  assert.equal(manifest.status, 200);
+  assert.ok(manifest.href.startsWith(site.url), `manifest 要在子路徑底下：${manifest.href}`);
+  assert.ok(manifest.json.name && manifest.json.short_name);
+  assert.ok(['standalone', 'fullscreen'].includes(manifest.json.display));
+  assert.ok(manifest.json.start_url && !manifest.json.start_url.startsWith('/'), `start_url 要是相對路徑：${manifest.json.start_url}`);
+  assert.ok(manifest.json.scope && !manifest.json.scope.startsWith('/'), `scope 要是相對路徑：${manifest.json.scope}`);
+  assert.ok(manifest.icons.some((i) => i.sizes === '192x192'));
+  assert.ok(manifest.icons.some((i) => i.sizes === '512x512'));
+  assert.ok(manifest.icons.some((i) => i.purpose === 'maskable'), '要有 maskable 圖示（Android 圓形圖示）');
+  for (const icon of manifest.icons) {
+    assert.equal(icon.status, 200, icon.src);
+    assert.equal(icon.type, 'image/png', icon.src);
+    assert.ok(icon.bytes > 100, `${icon.src} 不能是空的`);
+  }
+  assert.ok(manifest.links.length >= 2);
+  for (const l of manifest.links) assert.equal(l.status, 200, l.href);
+
+  // service worker 就緒後重新整理一次，頁面才會被它接管
+  await page.evaluate(() => navigator.serviceWorker.ready);
+  await page.reload();
+  await page.waitForFunction(() => !!navigator.serviceWorker.controller, null, { timeout: 5000 });
+  const scope = await page.evaluate(async () => (await navigator.serviceWorker.ready).scope);
+  assert.equal(scope, site.url, 'service worker 的範圍就是子路徑');
+
+  // 斷網重新整理：開頭畫面還在，單人模式照常
+  await ctx.setOffline(true);
+  await page.reload();
+  await waitScreen(page, 'screen-join');
+  assert.equal(await page.isVisible('#solo-btn'), true);
+  assert.equal(await page.isVisible('#join-btn'), false);
+  await soloLobby(page, '離線');
+  await page.tap('#btn-start');
+  await waitScreen(page, 'hud');
+  assert.equal(await page.isVisible('#touch-attack'), true);
+  await page.waitForFunction(() => document.querySelector('#hud-clock').textContent !== '0:00', null, { timeout: 5000 });
+  assert.deepEqual(errors, [], `瀏覽器裡出現錯誤：\n${errors.join('\n')}`);
 });

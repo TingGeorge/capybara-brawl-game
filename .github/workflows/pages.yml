@@ -1,0 +1,58 @@
+name: 部署到 GitHub Pages
+
+# 第一次使用前，repo 擁有者要先手動設定一次：
+#   Settings → Pages → Build and deployment → Source 選「GitHub Actions」
+# 沒設定的話，下面的部署步驟會失敗。
+#
+# 部署出去的是「純靜態版」：只有單人模式（和電腦對戰），可以安裝到手機主畫面、離線也能玩。
+# 多人連線需要房主電腦跑 npm start，所以網站版不提供。
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# 同一時間只部署一次；後面的排隊等前面的做完，不要中途取消正在部署的
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: 打包網站
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # public/（不含 dev/ 開發頁）+ shared/ 組成 _site，並把「連線對戰」關掉、只留單人模式。
+      # 瀏覽器測試（e2e）也用同一支程式組網站，確保測過的就是部署出去的。
+      # 找不到 LAN_SERVER = true 時這一步會失敗，免得網站上出現連不上的「連線對戰」按鈕。
+      - name: 組出 _site 資料夾
+        run: node scripts/build-static.mjs _site
+
+      - uses: actions/configure-pages@v5
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    name: 部署
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

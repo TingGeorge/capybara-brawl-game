@@ -1,17 +1,19 @@
-// 一場對戰的完整模擬。伺服器是唯一的裁判：位置、傷害、擊倒都在這裡算。
+// 一場對戰的完整模擬。伺服器是唯一的裁判：位置、傷害、擊倒都在這裡算（單人模式時，這個裁判就跑在瀏覽器裡）。
 import {
   DT, TILE, PLAYER_RADIUS, PLAYER_HALF, SNAPSHOT_EVERY, COUNTDOWN_SECONDS, RESPAWN_SECONDS,
   SPAWN_SHIELD_SECONDS, REGEN_DELAY, REGEN_RATE, SPRING_HEAL_RATE, BUSH_REVEAL_DIST,
   REVEAL_AFTER_ATTACK, FLAG,
-} from '../shared/constants.js';
-import { CHAR_BY_ID } from '../shared/characters.js';
-import { SPAWN_POINTS, WORLD_W, WORLD_H, startPoint, tileAtPos } from '../shared/map.js';
-import { moveBox, boxHitsWall, lineOfSight, moveMultiplier, stepMove, angleDiff } from '../shared/physics.js';
+} from './constants.js';
+import { CHAR_BY_ID } from './characters.js';
+import { SPAWN_POINTS, WORLD_W, WORLD_H, startPoint, tileAtPos } from './map.js';
+import { moveBox, boxHitsWall, lineOfSight, moveMultiplier, stepMove, angleDiff } from './physics.js';
 import { updateBot } from './bot.js';
 
 const MAX_INPUTS_PER_TICK = 8;
 const r1 = (v) => Math.round(v * 10) / 10;
 const r2 = (v) => Math.round(v * 100) / 100;
+// 移動方向：鍵盤是 -1/0/1，手機搖桿可以是任何角度（速度一樣，stepMove 會正規化）
+const moveAxis = (v) => (Number.isFinite(v) ? r2(Math.max(-1, Math.min(1, v))) : 0);
 
 export class Match {
   constructor({ players, koTarget, duration, send }) {
@@ -96,7 +98,7 @@ export class Match {
       if (!Array.isArray(item)) continue;
       const [seq, mx, my] = item;
       if (!Number.isFinite(seq) || seq <= p.lastSeq) continue;
-      p.inputs.push([seq, Math.sign(mx) || 0, Math.sign(my) || 0]);
+      p.inputs.push([seq, moveAxis(mx), moveAxis(my)]);
     }
     if (p.inputs.length > 30) {
       p.lastSeq = p.inputs[p.inputs.length - 31][0];

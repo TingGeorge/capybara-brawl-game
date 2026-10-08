@@ -1,7 +1,7 @@
 // 每一隻角色都由「玩家」放一次大招，確認效果真的有發生。
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Match } from '../server/match.js';
+import { Match } from '../shared/match.js';
 import { CHARACTERS } from '../shared/characters.js';
 import { TICK_RATE, TILE } from '../shared/constants.js';
 

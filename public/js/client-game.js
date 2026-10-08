@@ -1,10 +1,10 @@
 // 瀏覽器端的對戰邏輯：
 // - 自己的水豚：按鍵當下就先在本地移動（預測），收到伺服器結果後再校正，手感才不會延遲。
 // - 其他人和子彈：在兩張伺服器快照之間做插值，畫面才會滑順。
-import { DT, FLAG, TILE } from '/shared/constants.js';
-import { CHAR_BY_ID } from '/shared/characters.js';
-import { WORLD_W, WORLD_H } from '/shared/map.js';
-import { stepMove, moveMultiplier } from '/shared/physics.js';
+import { DT, FLAG, TILE } from '../shared/constants.js';
+import { CHAR_BY_ID } from '../shared/characters.js';
+import { WORLD_W, WORLD_H } from '../shared/map.js';
+import { stepMove, moveMultiplier } from '../shared/physics.js';
 
 const INTERP_MS = 70;
 const PREDICT_BLOCK = FLAG.STUN | FLAG.DASH | FLAG.LEAP;
@@ -12,6 +12,7 @@ const MOVE_FLAGS = FLAG.STUN | FLAG.SHIELD | FLAG.SPIN | FLAG.DASH | FLAG.LEAP;
 const IMMEDIATE = new Set(['atk', 'sup']);
 
 const lerp = (a, b, u) => a + (b - a) * u;
+const r2 = (v) => Math.round(v * 100) / 100;
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 function lerpAngle(a, b, u) {
   let d = b - a;
@@ -72,6 +73,7 @@ export class ClientGame {
     this.superWasReady = false;
     this.ended = false;
     this.ping = null;
+    this.lastState = null;
   }
 
   // ---------- 伺服器快照 ----------
@@ -130,9 +132,12 @@ export class ClientGame {
       && !(this.mySnap.f & PREDICT_BLOCK));
   }
 
-  // 固定 60 次/秒 取樣方向鍵，送給伺服器，同時在本地先走
+  // 固定 60 次/秒 取樣方向鍵（或手機搖桿），送給伺服器，同時在本地先走
   fixedStep(mx, my) {
     if (!this.me) return;
+    // 搖桿的方向取到小數兩位，和伺服器收到的完全一樣，預測才不會有誤差
+    mx = r2(mx);
+    my = r2(my);
     const seq = ++this.seq;
     this.pending.push({ seq, mx, my });
     if (this.pending.length > 120) this.pending.shift();
@@ -161,11 +166,7 @@ export class ClientGame {
     this.smooth.y *= k;
 
     const myPos = this.myDisplayPos();
-    if (myPos) {
-      const mouse = this.renderer.screenToWorld(input.mouseX, input.mouseY);
-      this.aim = Math.atan2(mouse.y - myPos.y, mouse.x - myPos.x);
-      this.aimDist = Math.hypot(mouse.x - myPos.x, mouse.y - myPos.y);
-    }
+    if (myPos) this.updateAim(myPos, mx, my);
     if (this.outbox.length) {
       this.net.send({ t: 'in', l: this.outbox, a: Math.round(this.aim * 100) / 100 });
       this.outbox = [];
@@ -180,11 +181,77 @@ export class ClientGame {
     state.camera = this.camera;
     this.renderer.render(state);
     this.updateHUD(now, state);
+    this.lastState = state;
+  }
+
+  // 滑鼠：瞄準游標的位置。手機：拖曳按鈕時照按鈕的方向和距離瞄準，沒在瞄準時面向走路的方向
+  updateAim(myPos, mx, my) {
+    const input = this.input;
+    if (input.mode === 'touch') {
+      const t = input.touchAim;
+      if (t) {
+        this.aim = t.angle;
+        this.aimDist = this.touchDist(t);
+      } else if (mx || my) {
+        this.aim = Math.atan2(my, mx);
+      }
+      return;
+    }
+    const mouse = this.renderer.screenToWorld(input.mouseX, input.mouseY);
+    this.aim = Math.atan2(mouse.y - myPos.y, mouse.x - myPos.x);
+    this.aimDist = Math.hypot(mouse.x - myPos.x, mouse.y - myPos.y);
+  }
+
+  aimRange(isSuper) {
+    return aimSpec(isSuper ? this.char.super : this.char.attack).range || 0;
+  }
+
+  // 拖曳的長度 → 丟多遠（拋物線攻擊、跳躍、陷阱才用得到；直線子彈不管距離）
+  touchDist(t) {
+    return this.aimRange(t.super) * (0.15 + 0.85 * t.power);
+  }
+
+  // 點一下按鈕：瞄準最近、看得到、打得到的敵人；附近沒有就往面對的方向打
+  autoAim(isSuper) {
+    const pos = this.myDisplayPos();
+    const range = this.aimRange(isSuper);
+    let best = null;
+    let bestDist = Infinity;
+    for (const p of (this.lastState && this.lastState.players) || []) {
+      if (p.isMe || !p.alive || p.team === this.myTeam) continue;
+      const d = Math.hypot(p.x - pos.x, p.y - pos.y);
+      if (d < bestDist) {
+        best = p;
+        bestDist = d;
+      }
+    }
+    if (!best || bestDist > Math.max(range, 40) * 1.1) return { a: this.aim, d: range };
+    const t = this.leadTarget(best, pos, isSuper ? this.char.super : this.char.attack);
+    return { a: Math.atan2(t.y - pos.y, t.x - pos.x), d: Math.hypot(t.x - pos.x, t.y - pos.y) };
+  }
+
+  // 和電腦水豚一樣會預判：用最新兩張快照算出對方的速度，瞄準子彈（或丟出去的東西）到達時對方會在的位置
+  leadTarget(target, pos, spec) {
+    const n = this.snaps.length;
+    const s1 = this.snaps[n - 1];
+    const s0 = this.snaps[n - 2];
+    const q1 = s1 && s1.p.find((p) => p.i === target.id);
+    const q0 = s0 && s0.p.find((p) => p.i === target.id);
+    if (!q1 || !q1.al) return target;
+    if (!q0 || !q0.al || s1.tm <= s0.tm) return { x: q1.x, y: q1.y };
+    const dt = (s1.tm - s0.tm) / 1000;
+    const vx = (q1.x - q0.x) / dt;
+    const vy = (q1.y - q0.y) / dt;
+    if (Math.hypot(vx, vy) > 200) return { x: q1.x, y: q1.y }; // 剛復活或被撞飛，不準
+    let lead = 0;
+    if (spec.kind === 'bullet') lead = Math.hypot(q1.x - pos.x, q1.y - pos.y) / spec.speed;
+    else if (spec.kind === 'lob') lead = spec.flight;
+    return { x: q1.x + vx * lead * 0.8, y: q1.y + vy * lead * 0.8 };
   }
 
   handleAttacks(now) {
     const input = this.input;
-    const a = Math.round(this.aim * 100) / 100;
+    const a = r2(this.aim);
     const d = Math.round(this.aimDist);
     const clicked = input.consumeAttack();
     if (clicked || (input.attackHeld && now - this.lastAtkSent > 120)) {
@@ -193,6 +260,13 @@ export class ClientGame {
     }
     if (input.consumeSuper()) {
       if (this.mySnap && this.mySnap.su >= 1) this.net.send({ t: 'sup', a, d });
+    }
+    for (const shot of input.consumeTouchShots()) {
+      if (shot.super && !(this.mySnap && this.mySnap.su >= 1)) continue;
+      const aim = shot.auto ? this.autoAim(shot.super) : { a: shot.angle, d: this.touchDist(shot) };
+      this.aim = aim.a; // 轉身面向打出去的方向
+      this.net.send({ t: shot.super ? 'sup' : 'atk', a: r2(aim.a), d: Math.round(aim.d) });
+      if (!shot.super) this.lastAtkSent = now;
     }
   }
 
@@ -302,8 +376,13 @@ export class ClientGame {
 
     let aim = null;
     const myPos = this.myDisplayPos();
-    if (this.me && myPos && this.mySnap && this.mySnap.al && !this.ended) {
-      const useSuper = this.input.superAiming && this.mySnap.su >= 1;
+    // 手機只在拖曳按鈕瞄準時才畫瞄準線（大招沒集滿就不畫）
+    const touch = this.input.mode === 'touch';
+    const touchAim = touch ? this.input.touchAim : null;
+    const ready = !!(this.mySnap && this.mySnap.su >= 1);
+    const showAim = !touch || (touchAim && (!touchAim.super || ready));
+    if (this.me && myPos && this.mySnap && this.mySnap.al && !this.ended && showAim) {
+      const useSuper = (touch ? touchAim.super : this.input.superAiming) && ready;
       const spec = aimSpec(useSuper ? this.char.super : this.char.attack);
       aim = { x: myPos.x, y: myPos.y, angle: this.aim, dist: this.aimDist, isSuper: useSuper, ...spec };
     }

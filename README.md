@@ -4,7 +4,8 @@
 
 <p align="center">
   <b>10 隻拿著蔬菜水果當武器的水豚，在像素風競技場裡 3 對 3 大亂鬥！</b><br>
-  連上同一個 Wi-Fi，打開瀏覽器，就能和朋友一起連線對戰。
+  手機、電腦打開瀏覽器就能玩：自己和電腦水豚打，或連上同一個 Wi-Fi 和朋友連線對戰。<br>
+  👉 <a href="https://tinggeorge.github.io/capybara-brawl-game/"><b>用手機立刻開玩</b></a>（可以安裝成 App，沒有網路也能玩）
 </p>
 
 <p align="center">
@@ -13,6 +14,8 @@
   <img alt="Node.js 18+" src="https://img.shields.io/badge/Node.js-18%2B-5fa04e?logo=node.js&logoColor=white">
   <img alt="依賴套件 0 個" src="https://img.shields.io/badge/%E4%BE%9D%E8%B3%B4%E5%A5%97%E4%BB%B6-0%20%E5%80%8B-a8703f">
   <img alt="瀏覽器直接開玩" src="https://img.shields.io/badge/%E7%80%8F%E8%A6%BD%E5%99%A8-%E7%9B%B4%E6%8E%A5%E9%96%8B%E7%8E%A9-ffd34d">
+  <img alt="手機也能玩" src="https://img.shields.io/badge/%E6%89%8B%E6%A9%9F-%E4%B9%9F%E8%83%BD%E7%8E%A9-ff8a3d">
+  <img alt="PWA 可安裝" src="https://img.shields.io/badge/PWA-%E5%8F%AF%E5%AE%89%E8%A3%9D-5a0fc8">
 </p>
 
 ---
@@ -29,10 +32,12 @@
 </p>
 
 - 🐹 **10 隻角色、3 種定位**：射手、近戰、坦克，每隻都有自己的普通攻擊和大招
-- 🌐 **區域網路連線**：一個人開伺服器，朋友用瀏覽器打開網址就能加入，最多 6 個真人
-- 🤖 **電腦水豚補位**：人不夠也能玩，一個人也可以打 3 對 3
+- 📱 **手機也能玩**：像《荒野亂鬥》一樣的觸控搖桿，左手移動、右手拖曳瞄準攻擊
+- 📲 **可以安裝成 App（PWA）**：加到手機主畫面，全螢幕、沒有網路也能和電腦打
+- 🌐 **區域網路連線**：一個人開伺服器，朋友用手機或電腦的瀏覽器打開網址就能加入，最多 6 個真人
+- 🤖 **電腦水豚補位**：人不夠也能玩，一個人也可以打 3 對 3（單人對戰完全在瀏覽器裡跑，不需要伺服器）
 - 🌿 **地圖機關**：躲進草叢、泡溫泉回血、在水裡游得更快
-- 🎨 **全部即時畫出來**：沒有任何圖檔或音效檔，像素圖和音效都是程式即時產生的
+- 🎨 **全部即時畫出來**：遊戲裡的像素圖和音效都是程式即時產生的（只有 App 圖示是圖檔）
 
 ---
 
@@ -57,7 +62,19 @@
 
 ## 🚀 怎麼開始玩
 
-### 房主（只要一個人做）
+### 📱 用手機自己玩（什麼都不用裝）
+
+1. 用手機打開 **https://tinggeorge.github.io/capybara-brawl-game/**
+2. 輸入名字 → 按 **開始對戰（和電腦打）** → 選角色 → **開始對戰！**
+3. 想要像 App 一樣從主畫面打開（全螢幕、沒網路也能玩）：
+   - **iPhone / iPad（Safari）**：按下方的「分享」按鈕 → **加入主畫面**
+   - **Android（Chrome）**：按右上角「⋮」 → **安裝應用程式**（或「加到主畫面」）
+
+> 手機橫著拿畫面最大。這個網址只能和電腦水豚打；想和朋友連線對戰，請照下面的方式開伺服器。
+
+### 🌐 和朋友連線對戰
+
+#### 房主（只要一個人做）
 
 1. 安裝 [Node.js](https://nodejs.org/)（18 版以上，選 LTS 就好）
 2. 下載這個專案：按右上角綠色的 **Code → Download ZIP** 解壓縮，或是
@@ -78,13 +95,14 @@
    ```
    自己用瀏覽器打開 `http://localhost:3000`，把第二個網址傳給朋友。
 
-### 朋友
+#### 朋友
 
-**什麼都不用下載！** 連上和房主**同一個 Wi-Fi**，用電腦瀏覽器打開房主給的網址就好。
+**什麼都不用下載！** 連上和房主**同一個 Wi-Fi**，用手機或電腦的瀏覽器打開房主給的網址就好。
 
-### 開打
+#### 開打
 
-輸入名字 → 選角色、選隊伍 → 房主按下 **開始對戰！**
+輸入名字 → 按 **連線對戰** → 選角色、選隊伍 → 房主按下 **開始對戰！**
+（按 **單人對戰** 則是自己在瀏覽器裡和電腦打，不會進到大家的大廳。）
 人數不夠的話，房主勾選「用電腦水豚補滿 3 對 3」，電腦會自動補位。
 
 <p align="center">
@@ -93,7 +111,20 @@
 
 ---
 
-## ⌨️ 操作方式
+## 🎮 操作方式
+
+### 📱 手機（觸控）
+
+| 手指 | 動作 |
+|---|---|
+| 螢幕**左半邊**按住拖曳 | 移動（手指按在哪裡，搖桿就出現在哪裡） |
+| 右下 **攻擊鈕**：拖曳 → 放開 | 往拖曳的方向瞄準、放開就發射；拖曳的長度決定橘子這類拋物線攻擊丟多遠 |
+| 右下 **攻擊鈕**：點一下 | 自動瞄準最近的敵人 |
+| **大招鈕**（集滿會發光） | 用法和攻擊鈕一樣：拖曳瞄準、放開發射，點一下自動瞄準 |
+| 瞄準時拖回按鈕中間再放開 | 取消這一發 |
+| 左上 **計分板** / **靜音** / **離開** | 看計分板、開關聲音、離開單人對戰（按兩次才會離開） |
+
+### ⌨️ 電腦（鍵盤滑鼠）
 
 | 按鍵 | 動作 |
 |---|---|
@@ -127,6 +158,15 @@
 ---
 
 <details>
+<summary><b>📲 為什麼用房主的網址不能「安裝成 App」？</b></summary>
+
+瀏覽器規定只有 `https://` 的網站（或 `localhost`）才能安裝成 App、離線使用。
+房主電腦給的 `http://192.168.x.x:3000` 是區域網路的 `http` 網址，所以手機打開後一樣可以用觸控玩、可以連線對戰，只是不能安裝。
+想安裝到主畫面，請用上面的 GitHub Pages 網址（那個版本只有單人對戰）。
+
+</details>
+
+<details>
 <summary><b>🔧 朋友連不進來？</b></summary>
 
 1. **防火牆**：第一次執行 `npm start` 時，Windows 會問「是否允許 Node.js 存取網路」，請勾「私人網路」並按「允許」；Mac 跳出「是否允許傳入連線」也按「允許」。之前按了拒絕的話，到「Windows 安全性 → 防火牆與網路保護 → 允許應用程式通過防火牆」把 Node.js 打勾。
@@ -140,17 +180,23 @@
 <summary><b>🧩 給想改程式的人</b></summary>
 
 - **伺服器說了算**：移動、傷害、擊倒都在房主電腦上計算（每秒 60 次），每秒送 30 次畫面狀態給大家。
+- **單人對戰不用伺服器**：同一份大廳和對戰程式（`shared/lobby.js`、`shared/match.js`）直接在瀏覽器裡跑（`public/js/local-net.js`），所以可以放在 GitHub Pages、也能離線玩。
 - **不延遲的手感**：自己的水豚會先在瀏覽器裡移動，收到伺服器結果再校正；其他人則在兩個畫面狀態之間插值，看起來很滑順。
 - **零套件**：伺服器只用 Node.js 內建模組（包含自己寫的簡易 WebSocket）；像素圖用 Canvas 即時畫出來，音效用 Web Audio 即時合成。
 - **調整平衡**：所有角色的血量、速度、傷害、射程都在 [`shared/characters.js`](shared/characters.js)。
 
 ```
-server/    網頁伺服器、遊戲迴圈、大廳、對戰模擬、電腦 AI
-shared/    伺服器和瀏覽器共用：常數、地圖、角色數值、碰撞
-public/    網頁：畫面繪製、像素圖、介面、音效、連線
-test/      npm test：遊戲規則、電腦對戰、連線測試
-e2e/      npm run test:e2e：瀏覽器實玩測試
+server/    網頁伺服器、WebSocket、遊戲迴圈
+shared/    伺服器和瀏覽器共用：大廳、對戰模擬、電腦 AI、常數、地圖、角色數值、碰撞
+public/    網頁：畫面繪製、像素圖、介面、音效、連線、觸控按鈕、PWA（manifest、service worker、圖示）
+scripts/   build-static.mjs：整理成 GitHub Pages 用的純靜態網站
+test/      npm test：遊戲規則、電腦對戰、連線、單人模式、PWA 檔案
+e2e/      npm run test:e2e：瀏覽器實玩測試（包含手機觸控、靜態網站、離線）
 ```
+
+**放到 GitHub Pages（手機安裝用的網址）**：推送到 `main` 分支時，
+[`.github/workflows/pages.yml`](.github/workflows/pages.yml) 會用 `node scripts/build-static.mjs` 整理出只有單人模式的靜態網站並自動部署。
+第一次要到 GitHub 專案的 **Settings → Pages → Build and deployment → Source** 選 **GitHub Actions**。
 
 想打短一點或長一點的比賽，可以在啟動時設定（秒數、擊倒數）：
 
@@ -166,9 +212,13 @@ npm run test:e2e  # 真的開瀏覽器連線玩（先執行 npm install --no-sav
 ```
 
 每次推送程式，[GitHub Actions](https://github.com/TingGeorge/capybara-brawl-game/actions) 都會自動在 Windows、macOS、Linux 上跑 `npm test`，
-並用 Chrome、Firefox、Safari（WebKit）實際連線玩一輪：兩人對戰、網路延遲時的移動、中途加入觀戰、滿房、斷線提示。
+並用 Chrome、Firefox、Safari（WebKit）實際連線玩一輪：兩人對戰、網路延遲時的移動、中途加入觀戰、滿房、斷線提示，
+還有用手指玩單人對戰、手機直拿的版面、GitHub Pages 版本和離線開啟。
 
 伺服器開著的時候，還有幾個開發用的預覽頁：
-`/dev/sprites.html`（所有像素圖和整張地圖）、`/dev/renderer-preview.html`（戰鬥畫面）、`/dev/ui-preview.html?screen=lobby-host`（各個介面）。
+`/dev/sprites.html`（所有像素圖和整張地圖）、`/dev/renderer-preview.html`（戰鬥畫面）、`/dev/ui-preview.html?screen=lobby-host`（各個介面）、
+`/dev/icons.html`（App 圖示，可以重新產生 `public/icons/` 裡的 PNG）。
+
+用電腦測試手機版：Chrome 開發者工具（F12）按「切換裝置」圖示選一支手機，觸控按鈕就會出現（用滑鼠點一下畫面會切回電腦操作，再用模擬的手指點一下就會切回來）。
 
 </details>

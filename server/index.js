@@ -7,7 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { acceptWebSocket } from './websocket.js';
-import { Lobby } from './lobby.js';
+import { Lobby } from '../shared/lobby.js';
 import { DT } from '../shared/constants.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -21,6 +21,7 @@ const MIME = {
   '.js': 'text/javascript; charset=utf-8',
   '.css': 'text/css; charset=utf-8',
   '.json': 'application/json; charset=utf-8',
+  '.webmanifest': 'application/manifest+json; charset=utf-8',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
   '.ico': 'image/x-icon',
@@ -51,6 +52,8 @@ function serveStatic(req, res) {
     pathname = pathname.slice('/shared'.length);
   }
   if (pathname === '/') pathname = '/index.html';
+  // 沒有寫 <link rel="icon"> 的頁面（例如開發頁），瀏覽器會自己來要 /favicon.ico
+  if (pathname === '/favicon.ico') pathname = '/icons/favicon-32.png';
   const file = path.join(base, path.normalize(pathname));
   if (!file.startsWith(base + path.sep)) {
     res.writeHead(403).end();

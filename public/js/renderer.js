@@ -1,9 +1,9 @@
 // 遊戲畫面：把每一幀的狀態畫到 <canvas id="game"> 上。
 // 世界先畫在低解析度的小畫布（1 世界像素 = 1 像素），再整數倍放大貼到螢幕上，所以是道地的像素風；
 // 名字、血量數字、傷害數字最後才用螢幕解析度畫，字才清楚。
-import { TILE, FLAG } from '/shared/constants.js';
-import { WORLD_W, WORLD_H, tileAtPos } from '/shared/map.js';
-import { CHAR_BY_ID } from '/shared/characters.js';
+import { TILE, FLAG } from '../shared/constants.js';
+import { WORLD_W, WORLD_H, tileAtPos } from '../shared/map.js';
+import { CHAR_BY_ID } from '../shared/characters.js';
 import {
   buildMapArt, drawCapybara, ellipseSprite, getProjectile, getProjectileFlat, getPeel, getStar,
   getGhost, getSpringPool, getShieldBubble, makeSplat, makeCrack, weaponTip, ringPoints, hash,
