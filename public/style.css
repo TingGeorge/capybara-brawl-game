@@ -572,6 +572,23 @@ kbd {
   box-shadow: 0 0 0 2px var(--ink), inset 0 0 0 2px rgba(255, 211, 77, 0.25);
 }
 
+/* 自己的格子：左上角的「你」標籤（和角色卡的「已選」一樣；放右上角會蓋到長名字） */
+.slot.me::after {
+  content: "你";
+  position: absolute;
+  top: -0.6rem;
+  left: -0.45rem;
+  font-size: 0.75rem;
+  font-weight: 900;
+  line-height: 1.3;
+  padding: 0 0.45em;
+  color: #3b2405;
+  background: var(--gold);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  transform: rotate(-8deg);
+}
+
 .slot .pf {
   flex: none;
   width: 4.5rem;
@@ -1409,10 +1426,10 @@ kbd {
   color: var(--muted);
 }
 
-/* 被打倒 */
+/* 被打倒（蓋在觸控按鈕上面，等復活時按鈕也一起變灰） */
 .hud-dead {
   inset: 0;
-  z-index: 1;
+  z-index: 2;
   display: grid;
   place-items: center;
   background: radial-gradient(ellipse at center, rgba(10, 12, 30, 0.2) 20%, rgba(10, 12, 30, 0.72) 100%);
@@ -2380,12 +2397,14 @@ body.touch .super-btn .super-pct {
     padding: 0.8rem 1.1rem 0.4rem;
   }
 
+  /* 內容比螢幕高就往下捲（文字不會被切掉），「開始對戰」那一列一直貼在畫面底部 */
   .lobby {
-    grid-template-columns: 13rem minmax(0, 1fr) 13rem;
+    grid-template-columns: 14rem minmax(0, 1fr) 14rem;
     gap: 0.6rem;
+    height: auto;
     min-width: 0;
-    min-height: 0;
-    padding: calc(0.5rem + var(--safe-t)) calc(0.8rem + var(--safe-r)) calc(0.6rem + var(--safe-b)) calc(0.8rem + var(--safe-l));
+    min-height: 100%;
+    padding: calc(0.5rem + var(--safe-t)) calc(0.8rem + var(--safe-r)) 0 calc(0.8rem + var(--safe-l));
   }
 
   .lobby-head {
@@ -2396,22 +2415,50 @@ body.touch .super-btn .super-pct {
     gap: 0.6rem;
   }
 
+  /* 角色排成一列，左右滑動挑選（兩排太擠），右邊淡出提示還有更多 */
   .char-grid {
+    display: flex;
     gap: 0.45rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    margin: -0.4rem -0.4rem 0;
+    padding: 0.9rem 0.5rem 0.55rem;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.2rem), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2.2rem), transparent);
+  }
+
+  .char-grid::-webkit-scrollbar {
+    display: none;
   }
 
   .char-card {
+    flex: 0 0 7.4rem;
+    scroll-snap-align: start;
     padding: 0.3rem 0.3rem 0.35rem;
     gap: 0.15rem;
   }
 
   .char-card .pf {
-    height: 3.3rem;
+    height: 3.6rem;
   }
 
   .char-detail {
+    flex: none;
     gap: 0.8rem;
     padding: 0.6rem 0.8rem;
+    overflow: visible;
+  }
+
+  .lobby-foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    margin: 0 calc(-0.8rem - var(--safe-r)) 0 calc(-0.8rem - var(--safe-l));
+    padding: 0.5rem calc(0.8rem + var(--safe-r)) calc(0.6rem + var(--safe-b)) calc(0.8rem + var(--safe-l));
+    background: linear-gradient(to bottom, transparent, rgba(16, 21, 46, 0.97) 0.5rem);
   }
 
   .cd-portrait {
@@ -2419,8 +2466,7 @@ body.touch .super-btn .super-pct {
     height: 6rem;
   }
 
-  .cd-weapon,
-  .cd-desc {
+  .cc-weapon {
     display: none;
   }
 
@@ -2435,7 +2481,6 @@ body.touch .super-btn .super-pct {
   .skill {
     padding: 0.35rem 0.55rem;
     gap: 0.15rem;
-    overflow: hidden;
   }
 
   .skill-desc {
@@ -2443,16 +2488,45 @@ body.touch .super-btn .super-pct {
   }
 
   .slot .pf {
-    width: 3.8rem;
-    height: 3.1rem;
+    width: 3.2rem;
+    height: 2.8rem;
   }
 
+  .slot {
+    gap: 0.45rem;
+    padding: 0.35rem 0.45rem;
+  }
+
+  /* 貼在底部的那一列要薄一點：分享網址和標題排成一行，開始按鈕小一號 */
   .share-box {
-    padding: 0.45rem 0.8rem 0.5rem;
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.6rem;
+    padding: 0.4rem 0.8rem 0.45rem;
+  }
+
+  .share-title {
+    font-size: 0.8rem;
+  }
+
+  .url-chip {
+    font-size: 0.95rem;
+  }
+
+  /* 操作說明太長，手機上改成開打時跳出提示 */
+  .controls-help {
+    display: none;
   }
 
   .host-box {
-    padding: 0.5rem 0.6rem 0.6rem;
+    gap: 0.35rem;
+    padding: 0.4rem 0.6rem 0.45rem;
+  }
+
+  .btn-start {
+    font-size: 1.35rem;
+    padding: 0.2em 0.4em 0.32em;
   }
 
   /* 對戰畫面：擊倒訊息放到比分條下面（螢幕窄，放在右上角會蓋到比分），最多顯示 3 則 */
@@ -2610,6 +2684,10 @@ body.touch .super-btn .super-pct {
     order: -1;
   }
 
+  .controls-help {
+    display: none;
+  }
+
   /* 對戰畫面：比分條拿掉隊伍頭像，左上角的按鈕和右上角的擊倒訊息才放得下 */
   .sb-team {
     display: none;
@@ -2625,6 +2703,12 @@ body.touch .super-btn .super-pct {
 
   .result-tables {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 計分板：兩隊上下排，名字才放得下 */
+  .sbd-cols {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.6rem;
   }
 
   .result-title {

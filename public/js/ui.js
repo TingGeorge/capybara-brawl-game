@@ -387,6 +387,16 @@ function buildGrid() {
 
 function markPick(charId) {
   for (const [id, card] of cards) card.classList.toggle('selected', id === charId);
+  showPicked();
+}
+
+// 手機上角色排成可以左右滑的一列：選到的那張不在畫面上就捲過去
+function showPicked() {
+  const card = E.grid.querySelector('.char-card.selected');
+  if (!card || E.grid.scrollWidth <= E.grid.clientWidth + 1) return;
+  const g = E.grid.getBoundingClientRect();
+  const c = card.getBoundingClientRect();
+  if (c.left < g.left || c.right > g.right) E.grid.scrollLeft += c.left - g.left - (g.width - c.width) / 2;
 }
 
 function renderDetail(charId) {
@@ -447,7 +457,7 @@ function playerSlot(p, state, myId) {
   }
   row.append(h('span', 'slot-name', p.name));
   if ([...String(p.name)].length > 6) row.classList.add('long');
-  if (p.id === myId) row.append(h('span', 'slot-you', '（你）'));
+  // 自己的格子由 CSS 在右上角掛一個「你」（放在名字後面的話，名字長一點就會被切掉）
   const ch = h('div', 'slot-char');
   const c = CHAR_BY_ID[p.charId];
   if (c) ch.append(roleBadge(c.role));
@@ -603,7 +613,11 @@ export function showLobby(state, myId, handlers) {
 
   // 自己正在對戰（或看結算）時，大廳只在背景更新，不搶畫面
   const inGameView = screen === 'hud' || screen === 'screen-result';
-  if (!(inGameView && inMatch)) setScreen('screen-lobby');
+  if (!(inGameView && inMatch)) {
+    const entering = screen !== 'screen-lobby';
+    setScreen('screen-lobby');
+    if (entering) showPicked(); // 剛切到大廳時畫面才排好，這時才量得到位置
+  }
 }
 
 // ---------- 提示訊息 ----------

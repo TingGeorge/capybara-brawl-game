@@ -171,7 +171,15 @@ function wire(n) {
     game = new ClientGame({ info: m, myId, net, input, renderer, audio, ui });
     game.ping = ping;
     showGame(m, myId, { solo: net === soloNet });
-    if (input.mode === 'touch' && !m.spectator && innerHeight > innerWidth) showToast('把手機轉成橫的，畫面更大更好玩！');
+    if (input.mode === 'touch' && !m.spectator) {
+      // 前三場提醒一下手機怎麼操作（大廳裡放不下這麼長的說明）
+      const seen = Number(storage('capybrawl.tips')) || 0;
+      if (seen < 3) {
+        storage('capybrawl.tips', String(seen + 1));
+        showToast('左半邊拖曳移動；右下攻擊鈕拖曳瞄準、放開發射，點一下自動瞄準');
+      }
+      if (innerHeight > innerWidth) showToast('把手機轉成橫的，畫面更大更好玩！');
+    }
     input.setEnabled(!m.spectator);
   });
 

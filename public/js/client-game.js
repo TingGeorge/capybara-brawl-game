@@ -6,7 +6,10 @@ import { CHAR_BY_ID } from '../shared/characters.js';
 import { WORLD_W, WORLD_H } from '../shared/map.js';
 import { stepMove, moveMultiplier } from '../shared/physics.js';
 
+// 其他人畫在「70 毫秒前」的位置，兩張快照之間才有得內插。
+// 手機的 Wi-Fi 偶爾會慢個一兩百毫秒，這時自動多等一點（最多 160 毫秒），網路穩了再慢慢縮回來
 const INTERP_MS = 70;
+const INTERP_MAX = 160;
 const PREDICT_BLOCK = FLAG.STUN | FLAG.DASH | FLAG.LEAP;
 const MOVE_FLAGS = FLAG.STUN | FLAG.SHIELD | FLAG.SPIN | FLAG.DASH | FLAG.LEAP;
 const IMMEDIATE = new Set(['atk', 'sup']);
@@ -54,12 +57,15 @@ export class ClientGame {
     this.latest = null;
     this.latestAt = 0;
     this.offset = null;
+    this.late = 0; // 最近快照晚到的幅度（毫秒），會慢慢衰減
+    this.interp = INTERP_MS;
     this.mySnap = null;
     this.pending = [];
     this.outbox = [];
     this.seq = 0;
     this.acc = 0;
     this.pred = null;
+    this.prevPred = null; // 上一個固定步的預測位置：畫面在兩步之間內插，移動才滑順
     this.smooth = { x: 0, y: 0 };
     this.events = [];
     this.lastFrame = performance.now();
@@ -82,6 +88,9 @@ export class ClientGame {
     const now = performance.now();
     const sample = s.tm - now;
     this.offset = this.offset === null ? sample : Math.max(sample, this.offset - 0.5);
+    this.late = Math.max(this.offset - sample, this.late * 0.98);
+    const want = Math.min(INTERP_MAX, Math.max(INTERP_MS, 40 + this.late * 1.2));
+    this.interp += (want - this.interp) * 0.05;
     this.snaps.push(s);
     if (this.snaps.length > 40) this.snaps.shift();
     this.latest = s;
@@ -100,7 +109,7 @@ export class ClientGame {
     this.mySnap = sp;
     this.pending = this.pending.filter((inp) => inp.seq > sp.q);
     if (!sp.al) {
-      this.pred = null;
+      this.pred = this.prevPred = null;
       this.smooth.x = this.smooth.y = 0;
       return;
     }
@@ -117,6 +126,11 @@ export class ClientGame {
         this.smooth.y = ey;
       } else {
         this.smooth.x = this.smooth.y = 0;
+      }
+      // 上一步的位置跟著一起校正，內插才不會跳
+      if (this.prevPred) {
+        this.prevPred.x += x - this.pred.x;
+        this.prevPred.y += y - this.pred.y;
       }
     }
     this.pred = { x, y };
@@ -142,7 +156,12 @@ export class ClientGame {
     this.pending.push({ seq, mx, my });
     if (this.pending.length > 120) this.pending.shift();
     this.outbox.push([seq, mx, my]);
-    if (this.canMoveLocally()) [this.pred.x, this.pred.y] = this.stepLocal(this.pred.x, this.pred.y, mx, my, this.mySnap.f);
+    if (this.canMoveLocally()) {
+      this.prevPred = { x: this.pred.x, y: this.pred.y };
+      [this.pred.x, this.pred.y] = this.stepLocal(this.pred.x, this.pred.y, mx, my, this.mySnap.f);
+    } else if (this.pred) {
+      this.prevPred = null;
+    }
   }
 
   // ---------- 每一幀 ----------
@@ -174,7 +193,7 @@ export class ClientGame {
 
     if (active) this.handleAttacks(now);
 
-    const rt = now + this.offset - INTERP_MS;
+    const rt = now + this.offset - this.interp;
     const state = this.buildState(now, rt);
     this.flushEvents(rt, state);
     this.updateCamera(dt, state);
@@ -272,7 +291,12 @@ export class ClientGame {
 
   myDisplayPos() {
     if (!this.me) return null;
-    if (this.pred) return { x: this.pred.x + this.smooth.x, y: this.pred.y + this.smooth.y };
+    if (this.pred) {
+      // 固定每秒 60 步在算位置，但畫面的幀不一定剛好對齊：畫在上一步和這一步之間，才不會一頓一頓的
+      const prev = this.prevPred || this.pred;
+      const u = clamp01(this.acc / DT);
+      return { x: lerp(prev.x, this.pred.x, u) + this.smooth.x, y: lerp(prev.y, this.pred.y, u) + this.smooth.y };
+    }
     if (this.mySnap) return { x: this.mySnap.x, y: this.mySnap.y };
     return null;
   }
@@ -403,8 +427,8 @@ export class ClientGame {
     const me = state.players.find((p) => p.isMe);
     let target = null;
     if (me && me.alive) {
-      // 鏡頭對齊整數像素，自己的水豚才不會在畫面中央抖動
-      target = { x: Math.round(me.x), y: Math.round(me.y) };
+      // 鏡頭直接跟著自己（不取整數像素）：自己是另外用螢幕解析度畫的，畫面捲動才會一格一格的滑順，不會一頓一頓
+      target = { x: me.x, y: me.y };
     } else if (this.me) {
       target = { x: this.myTeam === 'blue' ? 3 * TILE : WORLD_W - 3 * TILE, y: WORLD_H / 2 };
     } else {

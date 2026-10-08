@@ -199,10 +199,12 @@ test('網路有延遲時，自己的水豚不會被拉來拉去', async (t) => {
     window.__maxFix = 0;
     const g = window.__game();
     const original = g.reconcile.bind(g);
+    // 比較收到伺服器結果前後的「預測位置」：預測得準，校正量就是 0
+    // （畫面上的位置會在兩個固定步之間內插，所以不拿它來比）
     g.reconcile = (s) => {
-      const before = g.myDisplayPos();
+      const before = g.pred ? { x: g.pred.x, y: g.pred.y } : null;
       original(s);
-      const after = g.pred ? { x: g.pred.x, y: g.pred.y } : before;
+      const after = g.pred;
       if (before && after) window.__maxFix = Math.max(window.__maxFix, Math.hypot(before.x - after.x, before.y - after.y));
     };
   });
@@ -532,8 +534,22 @@ test('有動態島的 iPhone 橫拿：畫面放大、地圖邊緣和自己不會
     const res = await route.fetch();
     await route.fulfill({ response: res, body: `${await res.text()}\nwindow.__game = () => game;\nwindow.__renderer = renderer;\n` });
   });
+  // 上次選的是最後一隻（泡湯長老）：手機橫拿時角色排成一列，進大廳要自動捲到看得到它
+  await page.evaluate(() => localStorage.setItem('capybrawl.char', 'onsen'));
   await page.reload();
-  await soloMatch(page, '島');
+  await soloLobby(page, '島');
+  await sleep(300);
+  const pick = await page.evaluate(() => {
+    const grid = document.querySelector('#char-grid').getBoundingClientRect();
+    const card = document.querySelector('#char-grid .char-card.selected');
+    const c = card.getBoundingClientRect();
+    return { id: card.dataset.id, inside: c.left >= grid.left - 1 && c.right <= grid.right + 1, scrolls: document.querySelector('#char-grid').scrollWidth > grid.width + 1 };
+  });
+  assert.equal(pick.id, 'onsen');
+  assert.ok(pick.scrolls, '手機橫拿時角色要排成可以左右滑的一列');
+  assert.ok(pick.inside, '選到的角色要捲到看得到的地方');
+  await page.tap('#btn-start');
+  await waitScreen(page, 'hud');
   await waitPlaying(page);
   await sleep(300);
 

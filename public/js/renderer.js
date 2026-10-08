@@ -87,7 +87,9 @@ export class Renderer {
     this.H = 1;
     this.Z = 2;
     this.cam = { left: 0, top: 0, lx: 0, ly: 0, offX: 0, offY: 0, vw: 1, vh: 1 };
-    this.L = { bg: layer(), entA: layer(), entB: layer(), over: layer(), top: layer() };
+    // 三張低解析度圖層：地面 + 自己後面的人、自己前面的人 + 牆頂草叢、空中的東西。
+    // 自己另外用螢幕解析度畫在中間，所以每幀只要放大貼到螢幕三次（手機上少貼幾張全螢幕的圖，比較順）
+    this.L = { bg: layer(), over: layer(), top: layer() };
     this.scratch = layer(112, 112); // 自己的角色另外畫（鏡頭跟著時才不會抖）
     this.art = buildMapArt();
     this.now = performance.now() / 1000;
@@ -212,7 +214,7 @@ export class Renderer {
     this.ambient(state, players, dt, now);
     this.updateHpLag(players, dt);
 
-    const { bg, entA, entB, over, top: topL } = this.L;
+    const { bg, over, top: topL } = this.L;
     const vw = cam.vw;
     const vh = cam.vh;
     const lx = cam.lx;
@@ -235,20 +237,12 @@ export class Renderer {
     if (meAir) this.drawGroundMarks(b, me, Math.round(me.x) - lx, Math.round(me.y) - ly, now, true);
     this.drawProjectileShadows(b, state.projectiles || []);
 
-    // ---- 2. 角色層（以自己為界分前後兩張，自己夾在中間）----
-    entA.ctx.clearRect(0, 0, vw, vh);
-    let usedB = false;
+    // ---- 2. 角色：在自己後面的直接畫在地面層，在自己前面的畫在上層（自己夾在中間）----
+    const o = over.ctx;
+    o.clearRect(0, 0, vw, vh);
     for (const p of others) {
       if ((p.z || 0) > 2) continue;
-      let c = entA.ctx;
-      if (me && p.y >= me.y) {
-        if (!usedB) {
-          entB.ctx.clearRect(0, 0, vw, vh);
-          usedB = true;
-        }
-        c = entB.ctx;
-      }
-      this.drawPlayerBody(c, p, Math.round(p.x) - lx, Math.round(p.y) - ly, now);
+      this.drawPlayerBody(me && p.y >= me.y ? o : b, p, Math.round(p.x) - lx, Math.round(p.y) - ly, now);
     }
 
     let meBlit = null;
@@ -266,8 +260,6 @@ export class Renderer {
     }
 
     // ---- 3. 蓋在角色上面的：牆頂、草叢 ----
-    const o = over.ctx;
-    o.clearRect(0, 0, vw, vh);
     o.drawImage(this.art.lips, -lx - MAP_MARGIN, -ly - MAP_MARGIN);
     this.drawBushes(o, players, me);
 
@@ -289,10 +281,8 @@ export class Renderer {
     const BW = vw * Z;
     const BH = vh * Z;
     ctx.drawImage(bg.cv, -cam.offX, -cam.offY, BW, BH);
-    ctx.drawImage(entA.cv, -cam.offX, -cam.offY, BW, BH);
     const sc = this.scratch.cv;
     if (meBlit && !meAir) ctx.drawImage(sc, meBlit.x, meBlit.y, sc.width * Z, sc.height * Z);
-    if (usedB) ctx.drawImage(entB.cv, -cam.offX, -cam.offY, BW, BH);
     ctx.drawImage(over.cv, -cam.offX, -cam.offY, BW, BH);
     if (meBlit && meAir) ctx.drawImage(sc, meBlit.x, meBlit.y, sc.width * Z, sc.height * Z);
     ctx.drawImage(topL.cv, -cam.offX, -cam.offY, BW, BH);
