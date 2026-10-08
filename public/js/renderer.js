@@ -107,8 +107,8 @@ export class Renderer {
     this.resize();
   }
 
-  // 瀏海、動態島、底部橫條佔掉的寬度（CSS 像素）。畫面照樣畫滿整個螢幕，
-  // 但鏡頭不會讓地圖邊緣跑到它們底下，靠牆的水豚才不會被擋住
+  // 瀏海、動態島、底部橫條和畫布重疊的寬度（CSS 像素）。鏡頭不會讓地圖邊緣跑到它們底下，靠牆的水豚才不會被擋住。
+  // 對戰時畫布左右已經讓開安全區（兩邊塗黑，見 style.css），這時左右就不用再算
   readSafeArea() {
     if (!this.safeProbe) {
       const probe = document.createElement('div');
@@ -118,9 +118,10 @@ export class Renderer {
       this.safeProbe = probe;
     }
     const cs = getComputedStyle(this.safeProbe);
+    const rect = this.canvas.getBoundingClientRect();
     this.safe = {
-      l: parseFloat(cs.paddingLeft) || 0,
-      r: parseFloat(cs.paddingRight) || 0,
+      l: Math.max(0, (parseFloat(cs.paddingLeft) || 0) - rect.left),
+      r: Math.max(0, (parseFloat(cs.paddingRight) || 0) - (window.innerWidth - rect.right)),
       t: parseFloat(cs.paddingTop) || 0,
       b: parseFloat(cs.paddingBottom) || 0,
     };

@@ -102,6 +102,22 @@ canvas {
   pointer-events: none;
 }
 
+/* 對戰時：手機橫拿左右兩邊的瀏海、動態島安全區都塗黑，遊戲畫面只畫在中間，兩邊對稱
+   （沒有瀏海的螢幕安全區是 0，畫面照樣鋪滿） */
+html {
+  background: #000;
+}
+
+body[data-screen="hud"] {
+  background: #000;
+}
+
+body[data-screen="hud"] #game {
+  left: var(--safe-l);
+  right: var(--safe-r);
+  width: calc(100% - var(--safe-l) - var(--safe-r));
+}
+
 /* iPhone「加入主畫面」後全螢幕開啟時，WebKit 會把頁面高度少算瀏海那一截（直拿時的 59px），
    橫拿時畫面底下就空出一條。這時只有 100lvh 是整個螢幕的高度，所以遊戲畫面和介面改用它 */
 @media (display-mode: standalone), (display-mode: fullscreen) {

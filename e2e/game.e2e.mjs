@@ -558,17 +558,23 @@ test('有動態島的 iPhone 橫拿：畫面放大、地圖邊緣和自己不會
   const view = await page.evaluate(() => {
     const r = window.__renderer;
     const me = window.__game().myDisplayPos();
+    const canvas = document.getElementById('game').getBoundingClientRect();
     return {
-      safe: r.safe,
+      canvasLeft: canvas.left,
+      canvasRight: innerWidth - canvas.right,
+      bodyBg: getComputedStyle(document.body).backgroundColor,
       viewW: r.W / r.Z,
       // 自己的水豚、地圖左邊的牆在螢幕上的 x（CSS 像素）
-      meX: ((me.x - r.cam.left) * r.Z) / r.dpr,
-      wallX: ((0 - r.cam.left) * r.Z) / r.dpr,
+      meX: canvas.left + ((me.x - r.cam.left) * r.Z) / r.dpr,
+      wallX: canvas.left + ((0 - r.cam.left) * r.Z) / r.dpr,
       killfeedTop: document.querySelector('#killfeed').getBoundingClientRect().top,
       scorebarBottom: document.querySelector('#hud-scorebar').getBoundingClientRect().bottom,
     };
   });
-  assert.equal(view.safe.l, 59, '要讀到左邊的安全區');
+  // 左右兩邊的安全區都塗黑，遊戲畫面只畫在中間
+  assert.equal(view.canvasLeft, 59, '遊戲畫面左邊要讓開安全區');
+  assert.equal(view.canvasRight, 59, '遊戲畫面右邊也要讓開安全區（兩邊對稱）');
+  assert.equal(view.bodyBg, 'rgb(0, 0, 0)', '兩邊讓出來的地方是黑色');
   assert.ok(view.viewW <= 440, `手機要放大：畫面寬只看得到約 360～440 世界像素，現在是 ${view.viewW}`);
   assert.ok(view.wallX >= 59 - 1, `地圖左邊的牆不能跑到動態島底下：x=${view.wallX}`);
   assert.ok(view.meX >= 59 + 10, `出生點的自己要在動態島右邊：x=${view.meX}`);
