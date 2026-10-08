@@ -47,7 +47,24 @@ function storage(key, value) {
   return null;
 }
 
-addEventListener('resize', () => renderer.resize());
+// iPhone「加入主畫面」後開啟時，WebKit 會把頁面高度少算一截（style.css 先用 100lvh 修）。
+// 萬一 100lvh 也量錯，就直接用螢幕的大小。navigator.standalone 只有 iPhone / iPad 的主畫面 App 才有
+const uiLayer = document.getElementById('ui');
+function fitIosHomeScreenApp() {
+  if (navigator.standalone !== true) return;
+  const landscape = innerWidth > innerHeight;
+  const full = landscape ? Math.min(screen.width, screen.height) : Math.max(screen.width, screen.height);
+  for (const el of [canvas, uiLayer]) {
+    el.style.height = '';
+    if (el.getBoundingClientRect().height < full - 2) el.style.height = `${full}px`;
+  }
+}
+fitIosHomeScreenApp();
+
+addEventListener('resize', () => {
+  fitIosHomeScreenApp();
+  renderer.resize();
+});
 input.onMute = () => {
   const muted = audio.toggleMute();
   const how = input.mode === 'touch' ? '再按一次開啟聲音' : '按 M 開啟聲音';

@@ -520,6 +520,48 @@ test('手機直拿：版面不會超出螢幕', async (t) => {
   noErrors(p);
 });
 
+test('有動態島的 iPhone 橫拿：畫面放大、地圖邊緣和自己不會被擋住', { skip: BROWSER !== 'chromium' && '只有 Chromium 能模擬瀏海安全區' }, async (t) => {
+  const srv = await server();
+  t.after(() => srv.stop());
+  // iPhone 15 Pro 橫拿：852x393、3 倍螢幕，左右各 59px 是動態島的安全區，底下 21px 是橫條
+  const p = await player(t, srv.url, '島', { join: false, context: { ...phoneContext(852, 393), deviceScaleFactor: 3 } });
+  const { page } = p;
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, left: 59, right: 59, bottom: 21 } });
+  await page.route('**/js/main.js', async (route) => {
+    const res = await route.fetch();
+    await route.fulfill({ response: res, body: `${await res.text()}\nwindow.__game = () => game;\nwindow.__renderer = renderer;\n` });
+  });
+  await page.reload();
+  await soloMatch(page, '島');
+  await waitPlaying(page);
+  await sleep(300);
+
+  const view = await page.evaluate(() => {
+    const r = window.__renderer;
+    const me = window.__game().myDisplayPos();
+    return {
+      safe: r.safe,
+      viewW: r.W / r.Z,
+      // 自己的水豚、地圖左邊的牆在螢幕上的 x（CSS 像素）
+      meX: ((me.x - r.cam.left) * r.Z) / r.dpr,
+      wallX: ((0 - r.cam.left) * r.Z) / r.dpr,
+      killfeedTop: document.querySelector('#killfeed').getBoundingClientRect().top,
+      scorebarBottom: document.querySelector('#hud-scorebar').getBoundingClientRect().bottom,
+    };
+  });
+  assert.equal(view.safe.l, 59, '要讀到左邊的安全區');
+  assert.ok(view.viewW <= 440, `手機要放大：畫面寬只看得到約 360～440 世界像素，現在是 ${view.viewW}`);
+  assert.ok(view.wallX >= 59 - 1, `地圖左邊的牆不能跑到動態島底下：x=${view.wallX}`);
+  assert.ok(view.meX >= 59 + 10, `出生點的自己要在動態島右邊：x=${view.meX}`);
+  assert.ok(view.killfeedTop >= view.scorebarBottom, `擊倒訊息不能蓋到比分條：${view.killfeedTop} < ${view.scorebarBottom}`);
+
+  // 介面也要躲開動態島
+  const tools = await page.locator('.hud-tools').boundingBox();
+  assert.ok(tools.x >= 59, `左上角的按鈕要在安全區裡：x=${tools.x}`);
+  noErrors(p);
+});
+
 test('兩隻手指同時：一邊走一邊瞄準', { skip: BROWSER !== 'chromium' && '只有 Chromium 能用 CDP 模擬多指觸控' }, async (t) => {
   const srv = await server();
   t.after(() => srv.stop());

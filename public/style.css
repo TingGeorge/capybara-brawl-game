@@ -102,6 +102,16 @@ canvas {
   pointer-events: none;
 }
 
+/* iPhone「加入主畫面」後全螢幕開啟時，WebKit 會把頁面高度少算瀏海那一截（直拿時的 59px），
+   橫拿時畫面底下就空出一條。這時只有 100lvh 是整個螢幕的高度，所以遊戲畫面和介面改用它 */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  #game,
+  #ui {
+    bottom: auto;
+    height: 100lvh;
+  }
+}
+
 .screen {
   position: absolute;
   inset: 0;
@@ -2444,6 +2454,15 @@ body.touch .super-btn .super-pct {
   .host-box {
     padding: 0.5rem 0.6rem 0.6rem;
   }
+
+  /* 對戰畫面：擊倒訊息放到比分條下面（螢幕窄，放在右上角會蓋到比分），最多顯示 3 則 */
+  .killfeed {
+    top: calc(5.4rem + var(--safe-t));
+  }
+
+  .kf:nth-child(n + 4) {
+    display: none;
+  }
 }
 
 /* 手機直拿：改成一欄由上往下（選角色 → 看能力 → 選隊伍 → 開始），太長可以捲動 */
@@ -2598,6 +2617,10 @@ body.touch .super-btn .super-pct {
 
   .killfeed {
     top: calc(5.4rem + var(--safe-t));
+  }
+
+  .kf:nth-child(n + 4) {
+    display: none;
   }
 
   .result-tables {

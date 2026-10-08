@@ -100,7 +100,28 @@ export class Renderer {
     this.cleanAt = 0;
     this.mask = new Uint8Array(4096);
     this.fx = new Effects(this);
+    this.safe = { l: 0, r: 0, t: 0, b: 0 };
+    this.safeProbe = null;
     this.resize();
+  }
+
+  // 瀏海、動態島、底部橫條佔掉的寬度（CSS 像素）。畫面照樣畫滿整個螢幕，
+  // 但鏡頭不會讓地圖邊緣跑到它們底下，靠牆的水豚才不會被擋住
+  readSafeArea() {
+    if (!this.safeProbe) {
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;'
+        + 'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+      document.body.append(probe);
+      this.safeProbe = probe;
+    }
+    const cs = getComputedStyle(this.safeProbe);
+    this.safe = {
+      l: parseFloat(cs.paddingLeft) || 0,
+      r: parseFloat(cs.paddingRight) || 0,
+      t: parseFloat(cs.paddingTop) || 0,
+      b: parseFloat(cs.paddingBottom) || 0,
+    };
   }
 
   // 畫布的 CSS 大小（還沒顯示出來時先用視窗大小）
@@ -120,7 +141,12 @@ export class Renderer {
     this.cssH = cssH;
     this.W = W;
     this.H = H;
-    this.Z = Math.max(2, Math.floor(Math.min(W / 384, H / 240)));
+    this.readSafeArea();
+    // 放大倍率取整數，像素才不會糊。電腦螢幕至少看得到 384x240 的範圍；
+    // 手機螢幕小，看到的範圍小一點（橫拿 360x180、直拿 240x360），水豚和字才不會太小
+    const phone = Math.min(cssW, cssH) < 500;
+    const [minW, minH] = !phone ? [384, 240] : cssW >= cssH ? [360, 180] : [240, 360];
+    this.Z = Math.max(2, Math.floor(Math.min(W / minW, H / minH)));
     const vw = Math.ceil(W / this.Z) + 2;
     const vh = Math.ceil(H / this.Z) + 2;
     for (const l of Object.values(this.L)) {
@@ -157,14 +183,23 @@ export class Renderer {
     this.myTeam = state.myTeam || null;
     const me = players.find((p) => p.isMe && !p.ambient) || null;
 
-    // 鏡頭：地圖比螢幕小就置中，不然貼齊地圖邊緣
+    // 鏡頭：地圖比螢幕小就置中，不然貼齊地圖邊緣（手機的瀏海、動態島那一截不算，地圖邊緣停在它們旁邊）
     const Z = this.Z;
     const viewW = this.W / Z;
     const viewH = this.H / Z;
+    const k = this.dpr / Z; // CSS 像素 → 世界像素
+    const sl = this.safe.l * k;
+    const sr = this.safe.r * k;
+    const st = this.safe.t * k;
+    const sb = this.safe.b * k;
     const camX = state.camera?.x ?? WORLD_W / 2;
     const camY = state.camera?.y ?? WORLD_H / 2;
-    const left = WORLD_W <= viewW ? (WORLD_W - viewW) / 2 : clamp(camX - viewW / 2, 0, WORLD_W - viewW);
-    const top = WORLD_H <= viewH ? (WORLD_H - viewH) / 2 : clamp(camY - viewH / 2, 0, WORLD_H - viewH);
+    const left = WORLD_W <= viewW - sl - sr
+      ? (WORLD_W - viewW) / 2 + (sr - sl) / 2
+      : clamp(camX - viewW / 2, -sl, WORLD_W - viewW + sr);
+    const top = WORLD_H <= viewH - st - sb
+      ? (WORLD_H - viewH) / 2 + (sb - st) / 2
+      : clamp(camY - viewH / 2, -st, WORLD_H - viewH + sb);
     const cam = this.cam;
     cam.left = left;
     cam.top = top;
