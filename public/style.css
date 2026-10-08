@@ -2119,7 +2119,7 @@ body.touch .super-key {
 body.touch .super-btn::before {
   content: "";
   position: absolute;
-  inset: -35%;
+  inset: -30%;
   border-radius: 50%;
   background: radial-gradient(circle, transparent 55%, rgba(11, 14, 34, 0.35));
   border: 3px solid rgba(246, 241, 227, 0.4);
@@ -2145,10 +2145,11 @@ body.touch .super-btn.cancel .super-core {
   filter: grayscale(1) brightness(0.8);
 }
 
-/* 手機上大招鈕也能按：放在攻擊鈕的左上方 */
+/* 手機上大招鈕也能按：放在攻擊鈕的左上方，中心相距約 1.3 個攻擊鈕寬，
+   攻擊鈕拖到最遠時，跑出來的圓鈕也碰不到大招鈕 */
 body.touch .super-btn {
-  right: calc(var(--safe-r) + var(--edge) + var(--atk) + 6px);
-  bottom: calc(var(--safe-b) + var(--edge) + var(--atk) * 0.55);
+  right: calc(var(--safe-r) + var(--edge) + var(--atk) * 1.6 - var(--sup) / 2);
+  bottom: calc(var(--safe-b) + var(--edge) + var(--atk) * 1.2 - var(--sup) / 2);
   width: var(--sup);
   height: var(--sup);
   font-size: clamp(10px, calc(var(--sup) / 7.6), 14px);

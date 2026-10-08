@@ -358,6 +358,27 @@ function recordShots(page) {
 
 const waitShots = (page, n) => page.waitForFunction((count) => window.__sent.length >= count, n, { timeout: 5000 });
 
+// 攻擊鈕和大招鈕不能疊在一起：把攻擊鈕的圓鈕往大招鈕的方向拖到最遠，兩個圓也不能碰到
+async function assertAttackClearOfSuper(page) {
+  const circle = async (sel) => {
+    const b = await page.locator(sel).boundingBox();
+    assert.ok(b, `${sel} 要看得到`);
+    return { x: b.x + b.width / 2, y: b.y + b.height / 2, r: b.width / 2 };
+  };
+  const atk = await circle('#touch-attack');
+  const sup = await circle('#hud-super');
+  const gap = (a, b) => Math.hypot(a.x - b.x, a.y - b.y) - a.r - b.r;
+  assert.ok(gap(atk, sup) > 8, `攻擊鈕和大招鈕要分開：間隔 ${gap(atk, sup).toFixed(1)}px`);
+  const dx = sup.x - atk.x;
+  const dy = sup.y - atk.y;
+  const len = Math.hypot(dx, dy);
+  await pointer(page, '#touch-attack', 'pointerdown', 21, atk.x, atk.y);
+  await pointer(page, '#touch-attack', 'pointermove', 21, atk.x + (dx / len) * 300, atk.y + (dy / len) * 300);
+  const knob = await circle('#touch-attack .stick-knob');
+  await pointer(page, '#touch-attack', 'pointercancel', 21, atk.x, atk.y);
+  assert.ok(gap(knob, sup) > 0, `攻擊鈕拖到最遠時不能蓋到大招鈕：間隔 ${gap(knob, sup).toFixed(1)}px`);
+}
+
 // 畫面上有沒有橫向超出螢幕的東西
 function overflowOf(page) {
   return page.evaluate(() => {
@@ -394,6 +415,7 @@ test('手機橫拿：單人模式用手指玩', async (t) => {
     assert.equal(await page.isVisible(sel), true, `${sel} 在手機上要看得到`);
   }
   await waitPlaying(page);
+  await assertAttackClearOfSuper(page);
   await recordShots(page);
 
   // 手指實際點得到的是搖桿區和攻擊鈕，沒有被別的東西蓋住
@@ -493,6 +515,8 @@ test('手機直拿：版面不會超出螢幕', async (t) => {
   await startBtn.tap();
   await waitScreen(page, 'hud');
   await noOverflow('對戰畫面');
+  await waitPlaying(page);
+  await assertAttackClearOfSuper(page);
   noErrors(p);
 });
 
