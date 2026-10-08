@@ -1,9 +1,9 @@
 // 遊戲畫面：把每一幀的狀態畫到 <canvas id="game"> 上。
 // 世界先畫在低解析度的小畫布（1 世界像素 = 1 像素），再整數倍放大貼到螢幕上，所以是道地的像素風；
 // 名字、血量數字、傷害數字最後才用螢幕解析度畫，字才清楚。
-import { TILE, FLAG } from '/shared/constants.js';
-import { WORLD_W, WORLD_H, tileAtPos } from '/shared/map.js';
-import { CHAR_BY_ID } from '/shared/characters.js';
+import { TILE, FLAG } from '../shared/constants.js';
+import { WORLD_W, WORLD_H, tileAtPos } from '../shared/map.js';
+import { CHAR_BY_ID } from '../shared/characters.js';
 import {
   buildMapArt, drawCapybara, ellipseSprite, getProjectile, getProjectileFlat, getPeel, getStar,
   getGhost, getSpringPool, getShieldBubble, makeSplat, makeCrack, weaponTip, ringPoints, hash,
@@ -87,7 +87,9 @@ export class Renderer {
     this.H = 1;
     this.Z = 2;
     this.cam = { left: 0, top: 0, lx: 0, ly: 0, offX: 0, offY: 0, vw: 1, vh: 1 };
-    this.L = { bg: layer(), entA: layer(), entB: layer(), over: layer(), top: layer() };
+    // 三張低解析度圖層：地面 + 自己後面的人、自己前面的人 + 牆頂草叢、空中的東西。
+    // 自己另外用螢幕解析度畫在中間，所以每幀只要放大貼到螢幕三次（手機上少貼幾張全螢幕的圖，比較順）
+    this.L = { bg: layer(), over: layer(), top: layer() };
     this.scratch = layer(112, 112); // 自己的角色另外畫（鏡頭跟著時才不會抖）
     this.art = buildMapArt();
     this.now = performance.now() / 1000;
@@ -100,7 +102,28 @@ export class Renderer {
     this.cleanAt = 0;
     this.mask = new Uint8Array(4096);
     this.fx = new Effects(this);
+    this.safe = { l: 0, r: 0, t: 0, b: 0 };
+    this.safeProbe = null;
     this.resize();
+  }
+
+  // 瀏海、動態島、底部橫條佔掉的寬度（CSS 像素）。畫面照樣畫滿整個螢幕，
+  // 但鏡頭不會讓地圖邊緣跑到它們底下，靠牆的水豚才不會被擋住
+  readSafeArea() {
+    if (!this.safeProbe) {
+      const probe = document.createElement('div');
+      probe.style.cssText = 'position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none;'
+        + 'padding:env(safe-area-inset-top,0px) env(safe-area-inset-right,0px) env(safe-area-inset-bottom,0px) env(safe-area-inset-left,0px)';
+      document.body.append(probe);
+      this.safeProbe = probe;
+    }
+    const cs = getComputedStyle(this.safeProbe);
+    this.safe = {
+      l: parseFloat(cs.paddingLeft) || 0,
+      r: parseFloat(cs.paddingRight) || 0,
+      t: parseFloat(cs.paddingTop) || 0,
+      b: parseFloat(cs.paddingBottom) || 0,
+    };
   }
 
   // 畫布的 CSS 大小（還沒顯示出來時先用視窗大小）
@@ -120,7 +143,12 @@ export class Renderer {
     this.cssH = cssH;
     this.W = W;
     this.H = H;
-    this.Z = Math.max(2, Math.floor(Math.min(W / 384, H / 240)));
+    this.readSafeArea();
+    // 放大倍率取整數，像素才不會糊。電腦螢幕至少看得到 384x240 的範圍；
+    // 手機螢幕小，看到的範圍小一點（橫拿 360x180、直拿 240x360），水豚和字才不會太小
+    const phone = Math.min(cssW, cssH) < 500;
+    const [minW, minH] = !phone ? [384, 240] : cssW >= cssH ? [360, 180] : [240, 360];
+    this.Z = Math.max(2, Math.floor(Math.min(W / minW, H / minH)));
     const vw = Math.ceil(W / this.Z) + 2;
     const vh = Math.ceil(H / this.Z) + 2;
     for (const l of Object.values(this.L)) {
@@ -157,14 +185,23 @@ export class Renderer {
     this.myTeam = state.myTeam || null;
     const me = players.find((p) => p.isMe && !p.ambient) || null;
 
-    // 鏡頭：地圖比螢幕小就置中，不然貼齊地圖邊緣
+    // 鏡頭：地圖比螢幕小就置中，不然貼齊地圖邊緣（手機的瀏海、動態島那一截不算，地圖邊緣停在它們旁邊）
     const Z = this.Z;
     const viewW = this.W / Z;
     const viewH = this.H / Z;
+    const k = this.dpr / Z; // CSS 像素 → 世界像素
+    const sl = this.safe.l * k;
+    const sr = this.safe.r * k;
+    const st = this.safe.t * k;
+    const sb = this.safe.b * k;
     const camX = state.camera?.x ?? WORLD_W / 2;
     const camY = state.camera?.y ?? WORLD_H / 2;
-    const left = WORLD_W <= viewW ? (WORLD_W - viewW) / 2 : clamp(camX - viewW / 2, 0, WORLD_W - viewW);
-    const top = WORLD_H <= viewH ? (WORLD_H - viewH) / 2 : clamp(camY - viewH / 2, 0, WORLD_H - viewH);
+    const left = WORLD_W <= viewW - sl - sr
+      ? (WORLD_W - viewW) / 2 + (sr - sl) / 2
+      : clamp(camX - viewW / 2, -sl, WORLD_W - viewW + sr);
+    const top = WORLD_H <= viewH - st - sb
+      ? (WORLD_H - viewH) / 2 + (sb - st) / 2
+      : clamp(camY - viewH / 2, -st, WORLD_H - viewH + sb);
     const cam = this.cam;
     cam.left = left;
     cam.top = top;
@@ -177,7 +214,7 @@ export class Renderer {
     this.ambient(state, players, dt, now);
     this.updateHpLag(players, dt);
 
-    const { bg, entA, entB, over, top: topL } = this.L;
+    const { bg, over, top: topL } = this.L;
     const vw = cam.vw;
     const vh = cam.vh;
     const lx = cam.lx;
@@ -200,20 +237,12 @@ export class Renderer {
     if (meAir) this.drawGroundMarks(b, me, Math.round(me.x) - lx, Math.round(me.y) - ly, now, true);
     this.drawProjectileShadows(b, state.projectiles || []);
 
-    // ---- 2. 角色層（以自己為界分前後兩張，自己夾在中間）----
-    entA.ctx.clearRect(0, 0, vw, vh);
-    let usedB = false;
+    // ---- 2. 角色：在自己後面的直接畫在地面層，在自己前面的畫在上層（自己夾在中間）----
+    const o = over.ctx;
+    o.clearRect(0, 0, vw, vh);
     for (const p of others) {
       if ((p.z || 0) > 2) continue;
-      let c = entA.ctx;
-      if (me && p.y >= me.y) {
-        if (!usedB) {
-          entB.ctx.clearRect(0, 0, vw, vh);
-          usedB = true;
-        }
-        c = entB.ctx;
-      }
-      this.drawPlayerBody(c, p, Math.round(p.x) - lx, Math.round(p.y) - ly, now);
+      this.drawPlayerBody(me && p.y >= me.y ? o : b, p, Math.round(p.x) - lx, Math.round(p.y) - ly, now);
     }
 
     let meBlit = null;
@@ -231,8 +260,6 @@ export class Renderer {
     }
 
     // ---- 3. 蓋在角色上面的：牆頂、草叢 ----
-    const o = over.ctx;
-    o.clearRect(0, 0, vw, vh);
     o.drawImage(this.art.lips, -lx - MAP_MARGIN, -ly - MAP_MARGIN);
     this.drawBushes(o, players, me);
 
@@ -254,10 +281,8 @@ export class Renderer {
     const BW = vw * Z;
     const BH = vh * Z;
     ctx.drawImage(bg.cv, -cam.offX, -cam.offY, BW, BH);
-    ctx.drawImage(entA.cv, -cam.offX, -cam.offY, BW, BH);
     const sc = this.scratch.cv;
     if (meBlit && !meAir) ctx.drawImage(sc, meBlit.x, meBlit.y, sc.width * Z, sc.height * Z);
-    if (usedB) ctx.drawImage(entB.cv, -cam.offX, -cam.offY, BW, BH);
     ctx.drawImage(over.cv, -cam.offX, -cam.offY, BW, BH);
     if (meBlit && meAir) ctx.drawImage(sc, meBlit.x, meBlit.y, sc.width * Z, sc.height * Z);
     ctx.drawImage(topL.cv, -cam.offX, -cam.offY, BW, BH);

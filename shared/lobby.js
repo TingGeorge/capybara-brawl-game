@@ -1,6 +1,6 @@
-// 大廳：管理連進來的玩家、隊伍、角色選擇，以及開始/結束對戰。
-import { TEAM_SIZE, MAX_HUMANS, KO_TARGET, MATCH_SECONDS, RESULT_SECONDS, DT } from '../shared/constants.js';
-import { CHARACTERS, CHAR_BY_ID } from '../shared/characters.js';
+// 大廳：管理連進來的玩家、隊伍、角色選擇，以及開始/結束對戰。連線對戰時跑在伺服器上，單人模式時跑在瀏覽器裡。
+import { TEAM_SIZE, MAX_HUMANS, KO_TARGET, MATCH_SECONDS, RESULT_SECONDS, DT } from './constants.js';
+import { CHARACTERS, CHAR_BY_ID } from './characters.js';
 import { Match } from './match.js';
 
 const BOT_NAMES = ['阿嚕', '咕嚕', '圓圓', '麻糬', '布丁', '豆花', '芋圓', '湯圓', '飯糰', '奶茶'];
@@ -11,8 +11,9 @@ function cleanName(raw) {
 }
 
 export class Lobby {
-  constructor({ lanUrls, koTarget = KO_TARGET, duration = MATCH_SECONDS }) {
+  constructor({ lanUrls = () => [], koTarget = KO_TARGET, duration = MATCH_SECONDS, solo = false }) {
     this.lanUrls = lanUrls;
+    this.solo = solo; // 單人模式：只有自己一個人，一定用電腦補位
     this.koTarget = koTarget;
     this.duration = duration;
     this.clients = new Set();
@@ -90,7 +91,7 @@ export class Lobby {
         }
         break;
       case 'bots':
-        if (c.id === this.hostId) {
+        if (c.id === this.hostId && !this.solo) {
           this.bots = !!m.v;
           this.broadcastLobby();
         }
@@ -127,6 +128,7 @@ export class Lobby {
     return {
       t: 'lobby',
       phase: this.match ? 'match' : 'lobby',
+      solo: this.solo,
       hostId: this.hostId,
       bots: this.bots,
       urls: this.lanUrls(),

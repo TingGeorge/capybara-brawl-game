@@ -1,6 +1,6 @@
 // 水豚大亂鬥：所有 HTML 介面（標題、大廳、HUD、計分板、結算、斷線、提示訊息）
-import { CHARACTERS, CHAR_BY_ID } from '/shared/characters.js';
-import { ROLE_NAMES, TEAM_SIZE, MAX_HUMANS, TILE } from '/shared/constants.js';
+import { CHARACTERS, CHAR_BY_ID } from '../shared/characters.js';
+import { ROLE_NAMES, TEAM_SIZE, MAX_HUMANS, TILE } from '../shared/constants.js';
 import { audio } from './audio.js';
 
 const PORTRAIT_BASE = 16; // 頭像 canvas 預設邊長 = 16 × scale（drawPortrait 也可以自己改尺寸）
@@ -19,6 +19,12 @@ const HELP = [
   [['Tab'], '計分板'],
   [['M'], '靜音'],
 ];
+const TOUCH_HELP = [
+  [['左半邊'], '拖曳移動'],
+  [['攻擊鈕'], '拖曳瞄準、放開發射，點一下自動瞄準'],
+  [['大招鈕'], '集滿後一樣用法'],
+];
+const LEAVE_CONFIRM_MS = 3000;
 
 // 角色能力值（長條以全部角色的最大值為 100%）
 const dmgOf = (c) => c.attack.damage * (c.attack.count || 1);
@@ -49,6 +55,8 @@ let screen = null; // 目前顯示的畫面 id
 
 // 標題畫面
 let joinCb = null;
+let soloCb = null;
+let lanAvailable = true;
 // 大廳
 let lobbyHandlers = {};
 let lobbyMyId = null;
@@ -62,6 +70,8 @@ let game = null;
 let hc = {}; // HUD 快取：值沒變就不碰 DOM
 let centerTimer = 0;
 let sbKey = null;
+let hudHandlers = {};
+let leaveArmed = 0;
 // 斷線
 let reconnectCb = null;
 let reconnectTimer = 0;
@@ -138,6 +148,11 @@ export function initUI({ drawPortrait } = {}) {
     joinBtn: $('join-btn'),
     joinError: $('join-error'),
     joinPortraits: $('join-portraits'),
+    soloBtn: $('solo-btn'),
+    joinHint: $('join-hint'),
+    leave: $('btn-leave'),
+    fullscreen: $('btn-fullscreen'),
+    shareTitle: $('share-title'),
     banner: $('lobby-banner'),
     count: $('lobby-count'),
     grid: $('char-grid'),
@@ -162,6 +177,10 @@ export function initUI({ drawPortrait } = {}) {
     ping: $('hud-ping'),
     pingText: $('hud-ping-text'),
     muted: $('hud-muted'),
+    hudScore: $('hud-btn-score'),
+    hudMute: $('hud-btn-mute'),
+    hudLeave: $('hud-btn-leave'),
+    touchUi: $('touch-ui'),
     killfeed: $('killfeed'),
     dead: $('hud-dead'),
     respawn: $('hud-respawn'),
@@ -183,14 +202,16 @@ export function initUI({ drawPortrait } = {}) {
     return;
   }
 
-  // 標題畫面：按 Enter 或按鈕送出
+  // 標題畫面：按 Enter 或按鈕送出（按 Enter 時 submitter 是第一顆按鈕）
   E.joinForm.addEventListener('submit', (e) => {
     e.preventDefault();
     audio.unlock();
     if (E.joinBtn.disabled) return;
-    E.joinBtn.disabled = true;
-    setTimeout(() => (E.joinBtn.disabled = false), 700);
-    if (joinCb) joinCb(E.joinName.value.trim());
+    E.joinBtn.disabled = E.soloBtn.disabled = true;
+    setTimeout(() => (E.joinBtn.disabled = E.soloBtn.disabled = false), 700);
+    const solo = !lanAvailable || e.submitter === E.soloBtn;
+    const cb = solo ? soloCb : joinCb;
+    if (cb) cb(E.joinName.value.trim());
   });
   // 打字時不要觸發遊戲快捷鍵（M 靜音、WASD…）；按鍵擋掉了，所以這裡自己解鎖音效
   E.joinName.addEventListener('keydown', (e) => {
@@ -200,6 +221,9 @@ export function initUI({ drawPortrait } = {}) {
   E.joinName.addEventListener('keyup', (e) => e.stopPropagation());
 
   // 大廳按鈕
+  E.leave.addEventListener('click', () => callLobby('onLeave'));
+  E.fullscreen.addEventListener('click', () => callLobby('onFullscreen'));
+  document.addEventListener('fullscreenchange', updateFullscreenBtn);
   E.btnBlue.addEventListener('click', () => callLobby('onTeam', 'blue'));
   E.btnRed.addEventListener('click', () => callLobby('onTeam', 'red'));
   E.botsCheck.addEventListener('change', () => {
@@ -208,16 +232,40 @@ export function initUI({ drawPortrait } = {}) {
   });
   E.start.addEventListener('click', () => callLobby('onStart'));
 
-  // 操作說明
-  for (let i = 0; i < HELP.length; i++) {
-    const [keys, what] = HELP[i];
-    if (i) E.help.append(h('span', 'sep', '·'));
-    keys.forEach((k, j) => {
-      if (j) E.help.append(h('span', 'slash', '/'));
-      E.help.append(h('kbd', null, k));
-    });
-    E.help.append(h('span', null, what));
+  // 操作說明（電腦和手機各一份，CSS 依照現在用滑鼠還是手指決定顯示哪一份）
+  for (const [list, cls] of [[HELP, 'mouse-only'], [TOUCH_HELP, 'touch-only']]) {
+    const box = h('span', `help-set ${cls}`);
+    for (let i = 0; i < list.length; i++) {
+      const [keys, what] = list[i];
+      if (i) box.append(h('span', 'sep', '·'));
+      keys.forEach((k, j) => {
+        if (j) box.append(h('span', 'slash', '/'));
+        box.append(h('kbd', null, k));
+      });
+      box.append(h('span', null, what));
+    }
+    E.help.append(box);
   }
+
+  // 對戰中的小按鈕（手機用）
+  E.hudScore.addEventListener('click', () => callHud('onScoreboard'));
+  E.hudMute.addEventListener('click', () => callHud('onMute'));
+  E.hudLeave.addEventListener('click', () => {
+    // 按兩次才離開，避免手指不小心碰到
+    if (Date.now() - leaveArmed < LEAVE_CONFIRM_MS) {
+      leaveArmed = 0;
+      callHud('onLeave');
+      return;
+    }
+    leaveArmed = Date.now();
+    E.hudLeave.textContent = '再按一次離開';
+    E.hudLeave.classList.add('armed');
+    setTimeout(() => {
+      if (Date.now() - leaveArmed < LEAVE_CONFIRM_MS) return;
+      E.hudLeave.textContent = '離開';
+      E.hudLeave.classList.remove('armed');
+    }, LEAVE_CONFIRM_MS + 50);
+  });
 
   E.reconnect.addEventListener('click', () => {
     if (!reconnectCb) return;
@@ -245,13 +293,47 @@ function callLobby(name, arg) {
   if (typeof fn === 'function') fn(arg);
 }
 
+function callHud(name) {
+  const fn = hudHandlers && hudHandlers[name];
+  if (typeof fn === 'function') fn();
+}
+
+// 對戰中按鈕的動作：{ onScoreboard, onMute, onLeave }
+export function setHudHandlers(handlers) {
+  hudHandlers = handlers || {};
+}
+
+// 手機瀏覽器（不是已安裝的 App）才需要「全螢幕」按鈕
+function updateFullscreenBtn() {
+  if (!E.fullscreen) return;
+  const standalone = matchMedia('(display-mode: standalone), (display-mode: fullscreen)').matches;
+  E.fullscreen.hidden = !document.fullscreenEnabled || standalone || !document.body.classList.contains('touch');
+  E.fullscreen.textContent = document.fullscreenElement ? '離開全螢幕' : '全螢幕';
+}
+
+// 切換滑鼠 / 手指操作時，換一套按鈕和說明
+export function setTouchMode(on) {
+  document.body.classList.toggle('touch', !!on);
+  updateFullscreenBtn();
+}
+
 // ---------- 標題畫面 ----------
 
-export function showJoin({ defaultName = '', onJoin } = {}) {
+export function showJoin({ defaultName = '', onJoin, onSolo, lan = true } = {}) {
   ensureInit();
   joinCb = onJoin || null;
+  soloCb = onSolo || null;
+  lanAvailable = !!lan;
   E.joinName.value = defaultName || '';
-  E.joinBtn.disabled = false;
+  E.joinBtn.disabled = E.soloBtn.disabled = false;
+  // 沒有房主伺服器（例如放在 GitHub Pages）時只能單人玩
+  E.joinBtn.hidden = !lanAvailable;
+  E.soloBtn.textContent = lanAvailable ? '單人對戰' : '開始對戰（和電腦打）';
+  E.soloBtn.classList.toggle('btn-gold', !lanAvailable);
+  E.soloBtn.classList.toggle('btn-blue', lanAvailable);
+  E.joinHint.textContent = lanAvailable
+    ? '和同一個 Wi-Fi 的朋友一起 3 對 3 大亂鬥！也可以自己和電腦打。'
+    : '和電腦水豚 3 對 3 大亂鬥！沒有網路也能玩。';
   setJoinError('');
   E.joinPortraits.replaceChildren();
   JOIN_LINEUP.forEach((id, i) => {
@@ -262,16 +344,19 @@ export function showJoin({ defaultName = '', onJoin } = {}) {
     E.joinPortraits.append(box);
   });
   setScreen('screen-join');
-  setTimeout(() => {
-    E.joinName.focus();
-    E.joinName.select();
-  }, 0);
+  // 手機上自動對焦會直接跳出鍵盤擋住畫面，所以只有電腦才自動對焦
+  if (!document.body.classList.contains('touch')) {
+    setTimeout(() => {
+      E.joinName.focus();
+      E.joinName.select();
+    }, 0);
+  }
 }
 
 export function setJoinError(msg) {
   ensureInit();
   E.joinError.textContent = msg || '';
-  E.joinBtn.disabled = false;
+  E.joinBtn.disabled = E.soloBtn.disabled = false;
   if (msg) restartAnim(E.joinError, 'shake');
 }
 
@@ -302,6 +387,16 @@ function buildGrid() {
 
 function markPick(charId) {
   for (const [id, card] of cards) card.classList.toggle('selected', id === charId);
+  showPicked();
+}
+
+// 手機上角色排成可以左右滑的一列：選到的那張不在畫面上就捲過去
+function showPicked() {
+  const card = E.grid.querySelector('.char-card.selected');
+  if (!card || E.grid.scrollWidth <= E.grid.clientWidth + 1) return;
+  const g = E.grid.getBoundingClientRect();
+  const c = card.getBoundingClientRect();
+  if (c.left < g.left || c.right > g.right) E.grid.scrollLeft += c.left - g.left - (g.width - c.width) / 2;
 }
 
 function renderDetail(charId) {
@@ -362,7 +457,7 @@ function playerSlot(p, state, myId) {
   }
   row.append(h('span', 'slot-name', p.name));
   if ([...String(p.name)].length > 6) row.classList.add('long');
-  if (p.id === myId) row.append(h('span', 'slot-you', '（你）'));
+  // 自己的格子由 CSS 在右上角掛一個「你」（放在名字後面的話，名字長一點就會被切掉）
   const ch = h('div', 'slot-char');
   const c = CHAR_BY_ID[p.charId];
   if (c) ch.append(roleBadge(c.role));
@@ -418,7 +513,13 @@ function renderPips(players, myId) {
   }
 }
 
-function renderUrls(urls) {
+function renderUrls(urls, solo) {
+  E.shareTitle.hidden = !!solo;
+  if (solo) {
+    urlsKey = null;
+    E.urls.replaceChildren(h('span', 'share-solo', '單人模式：電腦水豚會幫你補滿兩隊，選好角色就開打！'));
+    return;
+  }
   const list = Array.isArray(urls) ? urls : [];
   const key = list.join(' ');
   if (key === urlsKey) return;
@@ -482,13 +583,15 @@ export function showLobby(state, myId, handlers) {
   renderDetail(me ? me.charId : null);
   renderPips(players, myId);
   renderTeams(s, myId);
-  renderUrls(state.urls);
+  renderUrls(state.urls, state.solo);
 
   E.count.innerHTML = '';
-  E.count.append('玩家 ', h('b', null, String(players.length)), ` / ${MAX_HUMANS}`);
+  if (!state.solo) E.count.append('玩家 ', h('b', null, String(players.length)), ` / ${MAX_HUMANS}`);
   E.banner.hidden = !inMatch;
+  updateFullscreenBtn();
 
-  // 房主控制
+  // 房主控制（單人模式一定有電腦補位，不用勾）
+  E.botsLabel.hidden = !!state.solo;
   E.botsCheck.checked = !!state.bots;
   E.botsCheck.disabled = !isHost;
   E.botsLabel.classList.toggle('readonly', !isHost);
@@ -510,7 +613,11 @@ export function showLobby(state, myId, handlers) {
 
   // 自己正在對戰（或看結算）時，大廳只在背景更新，不搶畫面
   const inGameView = screen === 'hud' || screen === 'screen-result';
-  if (!(inGameView && inMatch)) setScreen('screen-lobby');
+  if (!(inGameView && inMatch)) {
+    const entering = screen !== 'screen-lobby';
+    setScreen('screen-lobby');
+    if (entering) showPicked(); // 剛切到大廳時畫面才排好，這時才量得到位置
+  }
 }
 
 // ---------- 提示訊息 ----------
@@ -534,7 +641,7 @@ function fmtClock(sec) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
 }
 
-export function showGame(info, myId) {
+export function showGame(info, myId, { solo = false } = {}) {
   ensureInit();
   const players = (info && info.players) || [];
   game = {
@@ -566,6 +673,12 @@ export function showGame(info, myId) {
   E.dead.hidden = true;
   E.spectator.hidden = !(info && info.spectator);
   E.superBtn.hidden = !!(info && info.spectator);
+  E.touchUi.hidden = !!(info && info.spectator);
+  E.hudLeave.hidden = !solo;
+  E.hudLeave.textContent = '離開';
+  E.hudLeave.classList.remove('armed');
+  leaveArmed = 0;
+  game.solo = solo;
   setScreen('hud');
 }
 
@@ -656,7 +769,9 @@ export function updateHUD(st) {
   setHidden(E.dead, 'dead', !dead);
   if (dead) setText(E.respawn, 'respawn', String(Math.max(1, Math.ceil(Number(st.respawnIn) || 0))));
 
-  // 延遲 / 靜音
+  // 延遲 / 靜音（單人模式沒有網路延遲，只在靜音時顯示）
+  setHidden(E.ping, 'pingHide', !!(game && game.solo) && !audio.muted);
+  setText(E.hudMute, 'muteBtn', audio.muted ? '開聲音' : '靜音');
   const ping = st.ping == null || !Number.isFinite(st.ping) ? null : Math.round(st.ping);
   setText(E.pingText, 'ping', ping == null ? '-- ms' : `${ping} ms`);
   const lvl = ping == null ? 'none' : ping < 60 ? 'good' : ping < 150 ? 'ok' : 'bad';
@@ -707,7 +822,11 @@ export function setScoreboard(visible, rows) {
   sbKey = key;
 
   const title = h('div', 'sbd-title');
-  title.append(h('span', null, '計分板'), h('small', null, '放開 Tab 關閉'));
+  title.append(
+    h('span', null, '計分板'),
+    h('small', 'mouse-only', '放開 Tab 關閉'),
+    h('small', 'touch-only', '再按一次「計分板」關閉'),
+  );
   const cols = h('div', 'sbd-cols');
   for (const team of TEAMS) {
     const box = h('div', `sbd-team team-${team}`);

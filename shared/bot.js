@@ -1,7 +1,7 @@
 // 電腦水豚的 AI：找最近看得到的敵人、保持適合自己的距離、左右閃避、血少就撤退。
-import { TILE } from '../shared/constants.js';
-import { MAP_W, MAP_H, isSolidTile, SPAWN_POINTS, SPRING_CENTER } from '../shared/map.js';
-import { lineOfSight, boxHitsWall } from '../shared/physics.js';
+import { TILE } from './constants.js';
+import { MAP_W, MAP_H, isSolidTile, SPAWN_POINTS, SPRING_CENTER } from './map.js';
+import { lineOfSight, boxHitsWall } from './physics.js';
 
 const DIRS = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
 

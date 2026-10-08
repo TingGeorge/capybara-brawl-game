@@ -1,9 +1,9 @@
 // 水豚大亂鬥的像素美術：全部在執行時用程式畫出來，不載入任何圖檔。
 // 每張圖是一串 ASCII（一個字元 = 一個像素），只畫填色，深棕色外框自動補上；
 // 畫好的小畫布會快取起來，之後每一幀直接貼上。
-import { TILE } from '/shared/constants.js';
-import { MAP_W, MAP_H, WORLD_W, WORLD_H, tileAt } from '/shared/map.js';
-import { CHAR_BY_ID, CHARACTERS } from '/shared/characters.js';
+import { TILE } from '../shared/constants.js';
+import { MAP_W, MAP_H, WORLD_W, WORLD_H, tileAt } from '../shared/map.js';
+import { CHAR_BY_ID, CHARACTERS } from '../shared/characters.js';
 
 export const OUTLINE = '#2a170d';
 

@@ -2,9 +2,18 @@
 <html lang="zh-Hant">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
   <title>水豚大亂鬥</title>
-  <link rel="stylesheet" href="/style.css">
+  <meta name="description" content="10 隻拿著蔬菜水果當武器的水豚 3 對 3 大亂鬥！手機、電腦都能玩，可以和電腦對戰或和朋友連線。">
+  <meta name="theme-color" content="#141a36">
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" type="image/png" sizes="32x32" href="icons/favicon-32.png">
+  <link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="水豚大亂鬥">
+  <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <!-- 遊戲畫面（renderer 畫在這裡），永遠在最底層 -->
@@ -23,13 +32,15 @@
         <div id="join-portraits" class="join-portraits"></div>
         <form id="join-form" class="panel join-panel" autocomplete="off">
           <label class="join-label" for="join-name">你的名字</label>
+          <input id="join-name" class="pixel-input" type="text" maxlength="10" spellcheck="false" autocomplete="nickname" enterkeyhint="go" placeholder="輸入暱稱">
           <div class="join-row">
-            <input id="join-name" class="pixel-input" type="text" maxlength="10" spellcheck="false" placeholder="輸入暱稱">
-            <button id="join-btn" class="btn btn-gold btn-big" type="submit">加入大廳</button>
+            <!-- 按 Enter 等於按第一個按鈕：有伺服器時是「連線對戰」，沒有伺服器時這顆會藏起來，main.js 改成單人 -->
+            <button id="join-btn" class="btn btn-gold btn-big" type="submit">連線對戰</button>
+            <button id="solo-btn" class="btn btn-blue btn-big" type="submit">單人對戰</button>
           </div>
           <p id="join-error" class="join-error" role="alert"></p>
         </form>
-        <p class="join-hint">和同一個 Wi-Fi 的朋友一起 3 對 3 大亂鬥！</p>
+        <p id="join-hint" class="join-hint">和同一個 Wi-Fi 的朋友一起 3 對 3 大亂鬥！</p>
       </div>
     </section>
 
@@ -37,12 +48,14 @@
     <section id="screen-lobby" class="screen menu-bg" hidden>
       <div class="lobby">
         <header class="lobby-head">
+          <button id="btn-leave" class="btn btn-small" type="button">‹ 離開</button>
           <div class="lobby-title">
             <span class="logo-mini">水豚大亂鬥</span>
             <span class="tag">大廳</span>
           </div>
           <div id="lobby-banner" class="lobby-banner" hidden>對戰進行中，下一場就能加入</div>
           <div id="lobby-count" class="lobby-count"></div>
+          <button id="btn-fullscreen" class="btn btn-small" type="button" hidden>全螢幕</button>
         </header>
 
         <div class="team-col team-blue" data-team="blue">
@@ -64,7 +77,7 @@
 
         <footer class="lobby-foot">
           <div class="panel share-box">
-            <div class="share-title">叫朋友（同一個 Wi-Fi）用瀏覽器打開：</div>
+            <div id="share-title" class="share-title">叫朋友（同一個 Wi-Fi）用瀏覽器打開：</div>
             <div id="share-urls" class="share-urls"></div>
             <div id="controls-help" class="controls-help"></div>
           </div>
@@ -107,7 +120,13 @@
         <div id="hud-spectator" class="hud-spectator" hidden>觀戰中，下一場就能加入</div>
       </div>
 
-      <div id="hud-ping" class="hud-ping"><span class="ping-dot"></span><span id="hud-ping-text">-- ms</span><span id="hud-muted" class="hud-muted" hidden>靜音中</span></div>
+      <div class="hud-tools">
+        <div id="hud-ping" class="hud-ping"><span class="ping-dot"></span><span id="hud-ping-text">-- ms</span><span id="hud-muted" class="hud-muted" hidden>靜音中</span></div>
+        <!-- 手機沒有 Tab、M 鍵，改用按鈕 -->
+        <button id="hud-btn-score" class="hud-btn touch-only" type="button">計分板</button>
+        <button id="hud-btn-mute" class="hud-btn touch-only" type="button">靜音</button>
+        <button id="hud-btn-leave" class="hud-btn" type="button" hidden>離開</button>
+      </div>
       <ul id="killfeed" class="killfeed"></ul>
 
       <div id="hud-dead" class="hud-dead" hidden>
@@ -119,9 +138,18 @@
 
       <div id="hud-countdown" class="hud-countdown" hidden></div>
 
+      <!-- 手機觸控：左半邊是移動搖桿（按哪裡就從哪裡開始），右下是攻擊鈕 -->
+      <div id="touch-ui" class="touch-ui">
+        <div id="touch-zone" class="touch-zone"></div>
+        <div id="touch-stick" class="touch-stick"><div class="stick-knob"></div></div>
+        <div id="touch-attack" class="touch-attack" aria-label="攻擊">
+          <div class="stick-knob"></div>
+        </div>
+      </div>
+
       <div id="hud-super" class="super-btn" style="--charge: 0">
         <div class="super-ring"></div>
-        <div class="super-core">
+        <div class="super-core stick-knob">
           <div id="hud-super-name" class="super-name">大招</div>
           <div class="super-key">右鍵 / E</div>
         </div>
@@ -156,6 +184,6 @@
     <div id="toasts" class="toasts" aria-live="polite"></div>
   </div>
 
-  <script type="module" src="/js/main.js"></script>
+  <script type="module" src="js/main.js"></script>
 </body>
 </html>

@@ -29,9 +29,14 @@
   --font: "Microsoft JhengHei", "PingFang TC", "Noto Sans TC", sans-serif;
   --outline-2: -2px 0 0 var(--ink), 2px 0 0 var(--ink), 0 -2px 0 var(--ink), 0 2px 0 var(--ink),
     -2px -2px 0 var(--ink), 2px -2px 0 var(--ink), -2px 2px 0 var(--ink), 2px 2px 0 var(--ink);
-  /* 整個介面跟著視窗等比例縮放（1366x768 時 1rem = 16px） */
+  /* 整個介面跟著視窗等比例縮放（1366x768 時 1rem = 16px；手機另外在最下面調整） */
   font-size: clamp(10px, min(1.171vw, 2.083vh), 28px);
   color-scheme: dark;
+  /* 瀏海、圓角、底部橫條佔掉的空間 */
+  --safe-t: env(safe-area-inset-top, 0px);
+  --safe-r: env(safe-area-inset-right, 0px);
+  --safe-b: env(safe-area-inset-bottom, 0px);
+  --safe-l: env(safe-area-inset-left, 0px);
 }
 
 *,
@@ -45,15 +50,25 @@ body {
   margin: 0;
   height: 100%;
   overflow: hidden;
+  overscroll-behavior: none;
   background: var(--bg);
   color: var(--text);
   font-family: var(--font);
   font-weight: 700;
 }
 
+html {
+  /* 手機上可以捲動選單，但不能雙指縮放、雙擊放大 */
+  touch-action: pan-x pan-y;
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+  -webkit-tap-highlight-color: transparent;
+}
+
 body {
   user-select: none;
   -webkit-user-select: none;
+  -webkit-touch-callout: none;
   -webkit-font-smoothing: antialiased;
 }
 
@@ -71,9 +86,10 @@ canvas {
 #game {
   position: fixed;
   inset: 0;
-  width: 100vw;
-  height: 100vh;
+  width: 100%;
+  height: 100%;
   display: block;
+  touch-action: none;
   z-index: 0;
   background: #10142b;
   image-rendering: pixelated;
@@ -84,6 +100,16 @@ canvas {
   inset: 0;
   z-index: 1;
   pointer-events: none;
+}
+
+/* iPhone「加入主畫面」後全螢幕開啟時，WebKit 會把頁面高度少算瀏海那一截（直拿時的 59px），
+   橫拿時畫面底下就空出一條。這時只有 100lvh 是整個螢幕的高度，所以遊戲畫面和介面改用它 */
+@media (display-mode: standalone), (display-mode: fullscreen) {
+  #game,
+  #ui {
+    bottom: auto;
+    height: 100lvh;
+  }
 }
 
 .screen {
@@ -352,6 +378,11 @@ kbd {
   align-items: stretch;
 }
 
+.join-row .btn {
+  flex: 1 1 0;
+  white-space: nowrap;
+}
+
 .pixel-input {
   flex: 1;
   min-width: 0;
@@ -539,6 +570,23 @@ kbd {
   border-color: var(--gold);
   background: rgba(70, 56, 10, 0.4);
   box-shadow: 0 0 0 2px var(--ink), inset 0 0 0 2px rgba(255, 211, 77, 0.25);
+}
+
+/* 自己的格子：左上角的「你」標籤（和角色卡的「已選」一樣；放右上角會蓋到長名字） */
+.slot.me::after {
+  content: "你";
+  position: absolute;
+  top: -0.6rem;
+  left: -0.45rem;
+  font-size: 0.75rem;
+  font-weight: 900;
+  line-height: 1.3;
+  padding: 0 0.45em;
+  color: #3b2405;
+  background: var(--gold);
+  border: 2px solid var(--ink);
+  box-shadow: 2px 2px 0 var(--ink);
+  transform: rotate(-8deg);
 }
 
 .slot .pf {
@@ -1108,7 +1156,7 @@ kbd {
 }
 
 .hud-top {
-  top: 0.6rem;
+  top: calc(0.6rem + var(--safe-t));
   left: 50%;
   transform: translateX(-50%);
   display: flex;
@@ -1234,9 +1282,41 @@ kbd {
   white-space: nowrap;
 }
 
+.hud-tools {
+  top: calc(0.6rem + var(--safe-t));
+  left: calc(0.6rem + var(--safe-l));
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 0.4rem;
+}
+
+.hud-btn {
+  pointer-events: auto;
+  touch-action: manipulation;
+  font: inherit;
+  font-size: 0.85rem;
+  line-height: 1.2;
+  min-width: 3.4rem;
+  padding: 0.35em 0.7em 0.4em;
+  color: var(--text);
+  background: rgba(11, 14, 34, 0.75);
+  border: 3px solid var(--ink);
+  box-shadow: inset 0 0 0 2px var(--line), 3px 3px 0 var(--shadow);
+  cursor: pointer;
+}
+
+.hud-btn:active {
+  transform: translateY(2px);
+}
+
+.hud-btn.armed {
+  color: #3b2405;
+  background: var(--melee);
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.3), 3px 3px 0 var(--shadow);
+}
+
 .hud-ping {
-  top: 0.6rem;
-  left: 0.6rem;
   display: flex;
   align-items: center;
   gap: 0.4rem;
@@ -1275,8 +1355,8 @@ kbd {
 
 /* 擊倒訊息 */
 .killfeed {
-  top: 0.6rem;
-  right: 0.6rem;
+  top: calc(0.6rem + var(--safe-t));
+  right: calc(0.6rem + var(--safe-r));
   margin: 0;
   padding: 0;
   list-style: none;
@@ -1346,10 +1426,10 @@ kbd {
   color: var(--muted);
 }
 
-/* 被打倒 */
+/* 被打倒（蓋在觸控按鈕上面，等復活時按鈕也一起變灰） */
 .hud-dead {
   inset: 0;
-  z-index: 1;
+  z-index: 2;
   display: grid;
   place-items: center;
   background: radial-gradient(ellipse at center, rgba(10, 12, 30, 0.2) 20%, rgba(10, 12, 30, 0.72) 100%);
@@ -1419,8 +1499,8 @@ kbd {
 
 /* 大招按鈕 */
 .super-btn {
-  right: 2rem;
-  bottom: 2rem;
+  right: calc(2rem + var(--safe-r));
+  bottom: calc(2rem + var(--safe-b));
   width: 7.6rem;
   height: 7.6rem;
   border-radius: 50%;
@@ -1446,7 +1526,7 @@ kbd {
 
 .super-core {
   position: absolute;
-  inset: 0.8rem;
+  inset: 10.5%;
   z-index: 1;
   border-radius: 50%;
   display: flex;
@@ -1957,6 +2037,161 @@ kbd {
   transform: translateY(-0.5rem);
 }
 
+/* ---------- 手機觸控按鈕 ---------- */
+
+/* 用滑鼠時藏起觸控按鈕，用手指時藏起鍵盤說明 */
+body:not(.touch) .touch-only,
+body:not(.touch) .touch-ui {
+  display: none !important;
+}
+
+body.touch .mouse-only,
+body.touch .super-key {
+  display: none !important;
+}
+
+/* 觸控按鈕的大小（大招鈕在 .touch-ui 外面，所以變數放在 .hud） */
+.hud {
+  --stick: clamp(100px, 30vmin, 160px);
+  --atk: clamp(84px, 24vmin, 128px);
+  --sup: clamp(66px, 18vmin, 98px);
+  --edge: clamp(14px, 4vmin, 32px);
+}
+
+.touch-ui {
+  inset: 0;
+  z-index: 1;
+}
+
+/* 左半邊：手指放下去的地方就是搖桿 */
+.touch-zone {
+  position: absolute;
+  left: 0;
+  top: 22%;
+  bottom: 0;
+  width: 50%;
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-stick {
+  position: absolute;
+  left: calc(var(--safe-l) + var(--edge) + var(--stick) / 2);
+  top: calc(100% - var(--safe-b) - var(--edge) - var(--stick) / 2);
+  width: var(--stick);
+  height: var(--stick);
+  margin: calc(var(--stick) / -2) 0 0 calc(var(--stick) / -2);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(11, 14, 34, 0.15) 40%, rgba(11, 14, 34, 0.45));
+  border: 3px solid rgba(246, 241, 227, 0.35);
+  box-shadow: 0 0 0 3px rgba(11, 14, 34, 0.35);
+  opacity: 0.5;
+  pointer-events: none;
+}
+
+.touch-stick.active {
+  opacity: 1;
+}
+
+.stick-knob {
+  will-change: transform;
+}
+
+.touch-stick .stick-knob {
+  position: absolute;
+  left: 30%;
+  top: 30%;
+  width: 40%;
+  height: 40%;
+  border-radius: 50%;
+  background: radial-gradient(circle at 50% 35%, #fff8e4, #c9c1a8 70%);
+  border: 3px solid var(--ink);
+  box-shadow: 0 3px 0 rgba(0, 0, 0, 0.35);
+}
+
+/* 右下：攻擊鈕（拖曳瞄準） */
+.touch-attack {
+  position: absolute;
+  right: calc(var(--safe-r) + var(--edge));
+  bottom: calc(var(--safe-b) + var(--edge));
+  width: var(--atk);
+  height: var(--atk);
+  border-radius: 50%;
+  background: radial-gradient(circle, rgba(255, 90, 90, 0.18) 45%, rgba(116, 28, 44, 0.55));
+  border: 4px solid var(--ink);
+  box-shadow: inset 0 0 0 3px rgba(255, 138, 61, 0.55), 0 5px 0 var(--shadow);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+.touch-attack .stick-knob {
+  position: absolute;
+  z-index: 1;
+  left: 19%;
+  top: 19%;
+  width: 62%;
+  height: 62%;
+  border-radius: 50%;
+  /* 像素風準星 */
+  background:
+    url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 15 15' shape-rendering='crispEdges'%3E%3Cg fill='%230b0e22'%3E%3Crect x='7' y='1' width='2' height='4'/%3E%3Crect x='7' y='11' width='2' height='4'/%3E%3Crect x='1' y='7' width='4' height='2'/%3E%3Crect x='11' y='7' width='4' height='2'/%3E%3Crect x='5' y='3' width='6' height='1'/%3E%3Crect x='5' y='13' width='6' height='1'/%3E%3Crect x='3' y='5' width='1' height='6'/%3E%3Crect x='13' y='5' width='1' height='6'/%3E%3Crect x='4' y='4' width='1' height='1'/%3E%3Crect x='12' y='4' width='1' height='1'/%3E%3Crect x='4' y='12' width='1' height='1'/%3E%3Crect x='12' y='12' width='1' height='1'/%3E%3Crect x='7' y='7' width='2' height='2'/%3E%3C/g%3E%3Cg fill='%23fff'%3E%3Crect x='7' y='0' width='1' height='4'/%3E%3Crect x='7' y='10' width='1' height='4'/%3E%3Crect x='0' y='7' width='4' height='1'/%3E%3Crect x='10' y='7' width='4' height='1'/%3E%3Crect x='5' y='2' width='5' height='1'/%3E%3Crect x='5' y='12' width='5' height='1'/%3E%3Crect x='2' y='5' width='1' height='5'/%3E%3Crect x='12' y='5' width='1' height='5'/%3E%3Crect x='3' y='3' width='2' height='2'/%3E%3Crect x='10' y='3' width='2' height='2'/%3E%3Crect x='3' y='10' width='2' height='2'/%3E%3Crect x='10' y='10' width='2' height='2'/%3E%3Crect x='7' y='7' width='1' height='1'/%3E%3C/g%3E%3C/svg%3E") center / 58% no-repeat,
+    radial-gradient(circle at 50% 30%, #ff9a8a, #f0503c 55%, #b5281e);
+  border: 4px solid var(--ink);
+  box-shadow: inset 0 -0.3rem 0 rgba(0, 0, 0, 0.25), 0 3px 0 rgba(0, 0, 0, 0.35);
+  image-rendering: pixelated;
+}
+
+/* 按住時：外面出現一圈「可以拖多遠」的範圍，和荒野亂鬥一樣 */
+.touch-attack::before,
+body.touch .super-btn::before {
+  content: "";
+  position: absolute;
+  inset: -30%;
+  border-radius: 50%;
+  background: radial-gradient(circle, transparent 55%, rgba(11, 14, 34, 0.35));
+  border: 3px solid rgba(246, 241, 227, 0.4);
+  opacity: 0;
+  transform: scale(0.7);
+  transition: opacity 0.12s, transform 0.12s;
+  pointer-events: none;
+}
+
+.touch-attack.pressed::before,
+body.touch .super-btn.full.pressed::before {
+  opacity: 1;
+  transform: none;
+}
+
+.touch-attack.pressed {
+  background: radial-gradient(circle, rgba(255, 90, 90, 0.3) 45%, rgba(116, 28, 44, 0.75));
+}
+
+/* 瞄準後拖回中間 = 取消 */
+.touch-attack.cancel .stick-knob,
+body.touch .super-btn.cancel .super-core {
+  filter: grayscale(1) brightness(0.8);
+}
+
+/* 手機上大招鈕也能按：放在攻擊鈕的左上方，中心相距約 1.3 個攻擊鈕寬，
+   攻擊鈕拖到最遠時，跑出來的圓鈕也碰不到大招鈕 */
+body.touch .super-btn {
+  right: calc(var(--safe-r) + var(--edge) + var(--atk) * 1.6 - var(--sup) / 2);
+  bottom: calc(var(--safe-b) + var(--edge) + var(--atk) * 1.2 - var(--sup) / 2);
+  width: var(--sup);
+  height: var(--sup);
+  font-size: clamp(10px, calc(var(--sup) / 7.6), 14px);
+  pointer-events: auto;
+  touch-action: none;
+}
+
+body.touch .super-btn .super-name {
+  font-size: 1.1em;
+}
+
+body.touch .super-btn .super-pct {
+  font-size: 0.85em;
+}
+
 /* ---------- 動畫 ---------- */
 
 @keyframes dots {
@@ -2127,6 +2362,357 @@ kbd {
 @keyframes mvp {
   to {
     transform: rotate(-6deg) scale(1.12);
+  }
+}
+
+/* ---------- 手機版面 ---------- */
+
+/* 手機橫拿：高度只有 360～430 像素，把大廳壓扁一點，不用捲動就看得到「開始對戰」 */
+@media (orientation: landscape) and (max-height: 520px) {
+  .join-wrap {
+    gap: 0.9rem;
+    padding: calc(0.6rem + var(--safe-t)) 1rem calc(0.6rem + var(--safe-b));
+  }
+
+  .logo-main {
+    font-size: 4.8rem;
+  }
+
+  .logo-sub {
+    margin-top: 0.3rem;
+    font-size: 1.15rem;
+  }
+
+  .jp {
+    width: 5.6rem;
+    height: 4.6rem;
+  }
+
+  .jp.big {
+    width: 7rem;
+    height: 5.7rem;
+  }
+
+  .join-panel {
+    padding: 0.8rem 1.1rem 0.4rem;
+  }
+
+  /* 內容比螢幕高就往下捲（文字不會被切掉），「開始對戰」那一列一直貼在畫面底部 */
+  .lobby {
+    grid-template-columns: 14rem minmax(0, 1fr) 14rem;
+    gap: 0.6rem;
+    height: auto;
+    min-width: 0;
+    min-height: 100%;
+    padding: calc(0.5rem + var(--safe-t)) calc(0.8rem + var(--safe-r)) 0 calc(0.8rem + var(--safe-l));
+  }
+
+  .lobby-head {
+    min-height: 2.2rem;
+  }
+
+  .lobby-center {
+    gap: 0.6rem;
+  }
+
+  /* 角色排成一列，左右滑動挑選（兩排太擠），右邊淡出提示還有更多 */
+  .char-grid {
+    display: flex;
+    gap: 0.45rem;
+    overflow-x: auto;
+    overflow-y: hidden;
+    overscroll-behavior-x: contain;
+    scroll-snap-type: x proximity;
+    scrollbar-width: none;
+    margin: -0.4rem -0.4rem 0;
+    padding: 0.9rem 0.5rem 0.55rem;
+    -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 2.2rem), transparent);
+    mask-image: linear-gradient(to right, #000 calc(100% - 2.2rem), transparent);
+  }
+
+  .char-grid::-webkit-scrollbar {
+    display: none;
+  }
+
+  .char-card {
+    flex: 0 0 7.4rem;
+    scroll-snap-align: start;
+    padding: 0.3rem 0.3rem 0.35rem;
+    gap: 0.15rem;
+  }
+
+  .char-card .pf {
+    height: 3.6rem;
+  }
+
+  .char-detail {
+    flex: none;
+    gap: 0.8rem;
+    padding: 0.6rem 0.8rem;
+    overflow: visible;
+  }
+
+  .lobby-foot {
+    position: sticky;
+    bottom: 0;
+    z-index: 3;
+    margin: 0 calc(-0.8rem - var(--safe-r)) 0 calc(-0.8rem - var(--safe-l));
+    padding: 0.5rem calc(0.8rem + var(--safe-r)) calc(0.6rem + var(--safe-b)) calc(0.8rem + var(--safe-l));
+    background: linear-gradient(to bottom, transparent, rgba(16, 21, 46, 0.97) 0.5rem);
+  }
+
+  .cd-portrait {
+    width: 7rem;
+    height: 6rem;
+  }
+
+  .cc-weapon {
+    display: none;
+  }
+
+  .stats {
+    gap: 0.22rem 0.5rem;
+  }
+
+  .cd-skills {
+    gap: 0.4rem;
+  }
+
+  .skill {
+    padding: 0.35rem 0.55rem;
+    gap: 0.15rem;
+  }
+
+  .skill-desc {
+    line-height: 1.3;
+  }
+
+  .slot .pf {
+    width: 3.2rem;
+    height: 2.8rem;
+  }
+
+  .slot {
+    gap: 0.45rem;
+    padding: 0.35rem 0.45rem;
+  }
+
+  /* 貼在底部的那一列要薄一點：分享網址和標題排成一行，開始按鈕小一號 */
+  .share-box {
+    flex-direction: row;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 0.3rem 0.6rem;
+    padding: 0.4rem 0.8rem 0.45rem;
+  }
+
+  .share-title {
+    font-size: 0.8rem;
+  }
+
+  .url-chip {
+    font-size: 0.95rem;
+  }
+
+  /* 操作說明太長，手機上改成開打時跳出提示 */
+  .controls-help {
+    display: none;
+  }
+
+  .host-box {
+    gap: 0.35rem;
+    padding: 0.4rem 0.6rem 0.45rem;
+  }
+
+  .btn-start {
+    font-size: 1.35rem;
+    padding: 0.2em 0.4em 0.32em;
+  }
+
+  /* 對戰畫面：擊倒訊息放到比分條下面（螢幕窄，放在右上角會蓋到比分），最多顯示 3 則 */
+  .killfeed {
+    top: calc(5.4rem + var(--safe-t));
+  }
+
+  .kf:nth-child(n + 4) {
+    display: none;
+  }
+}
+
+/* 手機直拿：改成一欄由上往下（選角色 → 看能力 → 選隊伍 → 開始），太長可以捲動 */
+@media (orientation: portrait) and (max-width: 760px) {
+  :root {
+    font-size: clamp(10px, 2.9vw, 15px);
+  }
+
+  .lobby {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    grid-template-rows: auto auto auto auto;
+    grid-template-areas:
+      "head head"
+      "center center"
+      "foot foot"
+      "blue red";
+    gap: 0.6rem;
+    height: auto;
+    min-width: 0;
+    min-height: 100%;
+    padding: calc(0.6rem + var(--safe-t)) calc(0.6rem + var(--safe-r)) calc(0.8rem + var(--safe-b)) calc(0.6rem + var(--safe-l));
+  }
+
+  .join-wrap {
+    max-width: 100%;
+    gap: 1.1rem;
+    padding: calc(1rem + var(--safe-t)) 1rem calc(1rem + var(--safe-b));
+  }
+
+  .logo-main {
+    font-size: 4.5rem;
+  }
+
+  .logo-sub {
+    font-size: 1.1rem;
+  }
+
+  .join-portraits {
+    gap: 0.5rem;
+  }
+
+  .jp {
+    width: 5rem;
+    height: 4.2rem;
+  }
+
+  .jp.big {
+    width: 6.2rem;
+    height: 5.2rem;
+  }
+
+  .join-panel {
+    width: 30rem;
+  }
+
+  .lobby-head {
+    flex-wrap: wrap;
+    gap: 0.5rem;
+  }
+
+  .logo-mini {
+    font-size: 1.5rem;
+  }
+
+  .char-grid {
+    gap: 0.4rem;
+  }
+
+  .char-card {
+    padding: 0.3rem 0.2rem 0.35rem;
+    gap: 0.15rem;
+  }
+
+  .char-card .pf {
+    height: 3.6rem;
+  }
+
+  .cc-name {
+    font-size: 0.95rem;
+  }
+
+  .cc-weapon {
+    display: none;
+  }
+
+  .char-detail {
+    flex: none;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 0.6rem 0.8rem;
+    padding: 0.7rem;
+  }
+
+  .cd-portrait {
+    align-self: start;
+    width: 7.5rem;
+    height: 6.4rem;
+  }
+
+  .cd-skills {
+    grid-column: 1 / -1;
+    flex-direction: row;
+  }
+
+  .skill {
+    flex: 1 1 0;
+    min-width: 0;
+  }
+
+  .team-col {
+    padding: 0.45rem;
+    gap: 0.45rem;
+  }
+
+  .team-head {
+    font-size: 1.2rem;
+    letter-spacing: 0.15em;
+  }
+
+  .team-slots {
+    flex: none;
+    gap: 0.4rem;
+  }
+
+  .slot {
+    flex: none;
+    min-height: 3.6rem;
+    gap: 0.4rem;
+    padding: 0.3rem 0.4rem;
+  }
+
+  .slot .pf {
+    width: 3.2rem;
+    height: 2.7rem;
+  }
+
+  .slot-name-row {
+    font-size: 0.95rem;
+  }
+
+  .lobby-foot {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .host-box {
+    order: -1;
+  }
+
+  .controls-help {
+    display: none;
+  }
+
+  /* 對戰畫面：比分條拿掉隊伍頭像，左上角的按鈕和右上角的擊倒訊息才放得下 */
+  .sb-team {
+    display: none;
+  }
+
+  .killfeed {
+    top: calc(5.4rem + var(--safe-t));
+  }
+
+  .kf:nth-child(n + 4) {
+    display: none;
+  }
+
+  .result-tables {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  /* 計分板：兩隊上下排，名字才放得下 */
+  .sbd-cols {
+    grid-template-columns: minmax(0, 1fr);
+    gap: 0.6rem;
+  }
+
+  .result-title {
+    font-size: 3.4rem;
   }
 }
 

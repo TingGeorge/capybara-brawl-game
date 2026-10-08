@@ -1,17 +1,21 @@
 // 瀏覽器端的對戰邏輯：
 // - 自己的水豚：按鍵當下就先在本地移動（預測），收到伺服器結果後再校正，手感才不會延遲。
 // - 其他人和子彈：在兩張伺服器快照之間做插值，畫面才會滑順。
-import { DT, FLAG, TILE } from '/shared/constants.js';
-import { CHAR_BY_ID } from '/shared/characters.js';
-import { WORLD_W, WORLD_H } from '/shared/map.js';
-import { stepMove, moveMultiplier } from '/shared/physics.js';
+import { DT, FLAG, TILE } from '../shared/constants.js';
+import { CHAR_BY_ID } from '../shared/characters.js';
+import { WORLD_W, WORLD_H } from '../shared/map.js';
+import { stepMove, moveMultiplier } from '../shared/physics.js';
 
+// 其他人畫在「70 毫秒前」的位置，兩張快照之間才有得內插。
+// 手機的 Wi-Fi 偶爾會慢個一兩百毫秒，這時自動多等一點（最多 160 毫秒），網路穩了再慢慢縮回來
 const INTERP_MS = 70;
+const INTERP_MAX = 160;
 const PREDICT_BLOCK = FLAG.STUN | FLAG.DASH | FLAG.LEAP;
 const MOVE_FLAGS = FLAG.STUN | FLAG.SHIELD | FLAG.SPIN | FLAG.DASH | FLAG.LEAP;
 const IMMEDIATE = new Set(['atk', 'sup']);
 
 const lerp = (a, b, u) => a + (b - a) * u;
+const r2 = (v) => Math.round(v * 100) / 100;
 const clamp01 = (v) => Math.max(0, Math.min(1, v));
 function lerpAngle(a, b, u) {
   let d = b - a;
@@ -53,12 +57,15 @@ export class ClientGame {
     this.latest = null;
     this.latestAt = 0;
     this.offset = null;
+    this.late = 0; // 最近快照晚到的幅度（毫秒），會慢慢衰減
+    this.interp = INTERP_MS;
     this.mySnap = null;
     this.pending = [];
     this.outbox = [];
     this.seq = 0;
     this.acc = 0;
     this.pred = null;
+    this.prevPred = null; // 上一個固定步的預測位置：畫面在兩步之間內插，移動才滑順
     this.smooth = { x: 0, y: 0 };
     this.events = [];
     this.lastFrame = performance.now();
@@ -72,6 +79,7 @@ export class ClientGame {
     this.superWasReady = false;
     this.ended = false;
     this.ping = null;
+    this.lastState = null;
   }
 
   // ---------- 伺服器快照 ----------
@@ -80,6 +88,9 @@ export class ClientGame {
     const now = performance.now();
     const sample = s.tm - now;
     this.offset = this.offset === null ? sample : Math.max(sample, this.offset - 0.5);
+    this.late = Math.max(this.offset - sample, this.late * 0.98);
+    const want = Math.min(INTERP_MAX, Math.max(INTERP_MS, 40 + this.late * 1.2));
+    this.interp += (want - this.interp) * 0.05;
     this.snaps.push(s);
     if (this.snaps.length > 40) this.snaps.shift();
     this.latest = s;
@@ -98,7 +109,7 @@ export class ClientGame {
     this.mySnap = sp;
     this.pending = this.pending.filter((inp) => inp.seq > sp.q);
     if (!sp.al) {
-      this.pred = null;
+      this.pred = this.prevPred = null;
       this.smooth.x = this.smooth.y = 0;
       return;
     }
@@ -116,6 +127,11 @@ export class ClientGame {
       } else {
         this.smooth.x = this.smooth.y = 0;
       }
+      // 上一步的位置跟著一起校正，內插才不會跳
+      if (this.prevPred) {
+        this.prevPred.x += x - this.pred.x;
+        this.prevPred.y += y - this.pred.y;
+      }
     }
     this.pred = { x, y };
   }
@@ -130,14 +146,22 @@ export class ClientGame {
       && !(this.mySnap.f & PREDICT_BLOCK));
   }
 
-  // 固定 60 次/秒 取樣方向鍵，送給伺服器，同時在本地先走
+  // 固定 60 次/秒 取樣方向鍵（或手機搖桿），送給伺服器，同時在本地先走
   fixedStep(mx, my) {
     if (!this.me) return;
+    // 搖桿的方向取到小數兩位，和伺服器收到的完全一樣，預測才不會有誤差
+    mx = r2(mx);
+    my = r2(my);
     const seq = ++this.seq;
     this.pending.push({ seq, mx, my });
     if (this.pending.length > 120) this.pending.shift();
     this.outbox.push([seq, mx, my]);
-    if (this.canMoveLocally()) [this.pred.x, this.pred.y] = this.stepLocal(this.pred.x, this.pred.y, mx, my, this.mySnap.f);
+    if (this.canMoveLocally()) {
+      this.prevPred = { x: this.pred.x, y: this.pred.y };
+      [this.pred.x, this.pred.y] = this.stepLocal(this.pred.x, this.pred.y, mx, my, this.mySnap.f);
+    } else if (this.pred) {
+      this.prevPred = null;
+    }
   }
 
   // ---------- 每一幀 ----------
@@ -161,11 +185,7 @@ export class ClientGame {
     this.smooth.y *= k;
 
     const myPos = this.myDisplayPos();
-    if (myPos) {
-      const mouse = this.renderer.screenToWorld(input.mouseX, input.mouseY);
-      this.aim = Math.atan2(mouse.y - myPos.y, mouse.x - myPos.x);
-      this.aimDist = Math.hypot(mouse.x - myPos.x, mouse.y - myPos.y);
-    }
+    if (myPos) this.updateAim(myPos, mx, my);
     if (this.outbox.length) {
       this.net.send({ t: 'in', l: this.outbox, a: Math.round(this.aim * 100) / 100 });
       this.outbox = [];
@@ -173,18 +193,84 @@ export class ClientGame {
 
     if (active) this.handleAttacks(now);
 
-    const rt = now + this.offset - INTERP_MS;
+    const rt = now + this.offset - this.interp;
     const state = this.buildState(now, rt);
     this.flushEvents(rt, state);
     this.updateCamera(dt, state);
     state.camera = this.camera;
     this.renderer.render(state);
     this.updateHUD(now, state);
+    this.lastState = state;
+  }
+
+  // 滑鼠：瞄準游標的位置。手機：拖曳按鈕時照按鈕的方向和距離瞄準，沒在瞄準時面向走路的方向
+  updateAim(myPos, mx, my) {
+    const input = this.input;
+    if (input.mode === 'touch') {
+      const t = input.touchAim;
+      if (t) {
+        this.aim = t.angle;
+        this.aimDist = this.touchDist(t);
+      } else if (mx || my) {
+        this.aim = Math.atan2(my, mx);
+      }
+      return;
+    }
+    const mouse = this.renderer.screenToWorld(input.mouseX, input.mouseY);
+    this.aim = Math.atan2(mouse.y - myPos.y, mouse.x - myPos.x);
+    this.aimDist = Math.hypot(mouse.x - myPos.x, mouse.y - myPos.y);
+  }
+
+  aimRange(isSuper) {
+    return aimSpec(isSuper ? this.char.super : this.char.attack).range || 0;
+  }
+
+  // 拖曳的長度 → 丟多遠（拋物線攻擊、跳躍、陷阱才用得到；直線子彈不管距離）
+  touchDist(t) {
+    return this.aimRange(t.super) * (0.15 + 0.85 * t.power);
+  }
+
+  // 點一下按鈕：瞄準最近、看得到、打得到的敵人；附近沒有就往面對的方向打
+  autoAim(isSuper) {
+    const pos = this.myDisplayPos();
+    const range = this.aimRange(isSuper);
+    let best = null;
+    let bestDist = Infinity;
+    for (const p of (this.lastState && this.lastState.players) || []) {
+      if (p.isMe || !p.alive || p.team === this.myTeam) continue;
+      const d = Math.hypot(p.x - pos.x, p.y - pos.y);
+      if (d < bestDist) {
+        best = p;
+        bestDist = d;
+      }
+    }
+    if (!best || bestDist > Math.max(range, 40) * 1.1) return { a: this.aim, d: range };
+    const t = this.leadTarget(best, pos, isSuper ? this.char.super : this.char.attack);
+    return { a: Math.atan2(t.y - pos.y, t.x - pos.x), d: Math.hypot(t.x - pos.x, t.y - pos.y) };
+  }
+
+  // 和電腦水豚一樣會預判：用最新兩張快照算出對方的速度，瞄準子彈（或丟出去的東西）到達時對方會在的位置
+  leadTarget(target, pos, spec) {
+    const n = this.snaps.length;
+    const s1 = this.snaps[n - 1];
+    const s0 = this.snaps[n - 2];
+    const q1 = s1 && s1.p.find((p) => p.i === target.id);
+    const q0 = s0 && s0.p.find((p) => p.i === target.id);
+    if (!q1 || !q1.al) return target;
+    if (!q0 || !q0.al || s1.tm <= s0.tm) return { x: q1.x, y: q1.y };
+    const dt = (s1.tm - s0.tm) / 1000;
+    const vx = (q1.x - q0.x) / dt;
+    const vy = (q1.y - q0.y) / dt;
+    if (Math.hypot(vx, vy) > 200) return { x: q1.x, y: q1.y }; // 剛復活或被撞飛，不準
+    let lead = 0;
+    if (spec.kind === 'bullet') lead = Math.hypot(q1.x - pos.x, q1.y - pos.y) / spec.speed;
+    else if (spec.kind === 'lob') lead = spec.flight;
+    return { x: q1.x + vx * lead * 0.8, y: q1.y + vy * lead * 0.8 };
   }
 
   handleAttacks(now) {
     const input = this.input;
-    const a = Math.round(this.aim * 100) / 100;
+    const a = r2(this.aim);
     const d = Math.round(this.aimDist);
     const clicked = input.consumeAttack();
     if (clicked || (input.attackHeld && now - this.lastAtkSent > 120)) {
@@ -194,11 +280,23 @@ export class ClientGame {
     if (input.consumeSuper()) {
       if (this.mySnap && this.mySnap.su >= 1) this.net.send({ t: 'sup', a, d });
     }
+    for (const shot of input.consumeTouchShots()) {
+      if (shot.super && !(this.mySnap && this.mySnap.su >= 1)) continue;
+      const aim = shot.auto ? this.autoAim(shot.super) : { a: shot.angle, d: this.touchDist(shot) };
+      this.aim = aim.a; // 轉身面向打出去的方向
+      this.net.send({ t: shot.super ? 'sup' : 'atk', a: r2(aim.a), d: Math.round(aim.d) });
+      if (!shot.super) this.lastAtkSent = now;
+    }
   }
 
   myDisplayPos() {
     if (!this.me) return null;
-    if (this.pred) return { x: this.pred.x + this.smooth.x, y: this.pred.y + this.smooth.y };
+    if (this.pred) {
+      // 固定每秒 60 步在算位置，但畫面的幀不一定剛好對齊：畫在上一步和這一步之間，才不會一頓一頓的
+      const prev = this.prevPred || this.pred;
+      const u = clamp01(this.acc / DT);
+      return { x: lerp(prev.x, this.pred.x, u) + this.smooth.x, y: lerp(prev.y, this.pred.y, u) + this.smooth.y };
+    }
     if (this.mySnap) return { x: this.mySnap.x, y: this.mySnap.y };
     return null;
   }
@@ -302,8 +400,13 @@ export class ClientGame {
 
     let aim = null;
     const myPos = this.myDisplayPos();
-    if (this.me && myPos && this.mySnap && this.mySnap.al && !this.ended) {
-      const useSuper = this.input.superAiming && this.mySnap.su >= 1;
+    // 手機只在拖曳按鈕瞄準時才畫瞄準線（大招沒集滿就不畫）
+    const touch = this.input.mode === 'touch';
+    const touchAim = touch ? this.input.touchAim : null;
+    const ready = !!(this.mySnap && this.mySnap.su >= 1);
+    const showAim = !touch || (touchAim && (!touchAim.super || ready));
+    if (this.me && myPos && this.mySnap && this.mySnap.al && !this.ended && showAim) {
+      const useSuper = (touch ? touchAim.super : this.input.superAiming) && ready;
       const spec = aimSpec(useSuper ? this.char.super : this.char.attack);
       aim = { x: myPos.x, y: myPos.y, angle: this.aim, dist: this.aimDist, isSuper: useSuper, ...spec };
     }
@@ -324,8 +427,8 @@ export class ClientGame {
     const me = state.players.find((p) => p.isMe);
     let target = null;
     if (me && me.alive) {
-      // 鏡頭對齊整數像素，自己的水豚才不會在畫面中央抖動
-      target = { x: Math.round(me.x), y: Math.round(me.y) };
+      // 鏡頭直接跟著自己（不取整數像素）：自己是另外用螢幕解析度畫的，畫面捲動才會一格一格的滑順，不會一頓一頓
+      target = { x: me.x, y: me.y };
     } else if (this.me) {
       target = { x: this.myTeam === 'blue' ? 3 * TILE : WORLD_W - 3 * TILE, y: WORLD_H / 2 };
     } else {

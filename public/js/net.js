@@ -6,6 +6,10 @@ export class Net {
     this.onclose = null;
   }
 
+  get connected() {
+    return !!this.ws && this.ws.readyState <= 1;
+  }
+
   connect() {
     return new Promise((resolve, reject) => {
       const proto = location.protocol === 'https:' ? 'wss' : 'ws';
@@ -41,5 +45,15 @@ export class Net {
 
   send(obj) {
     if (this.ws && this.ws.readyState === WebSocket.OPEN) this.ws.send(JSON.stringify(obj));
+  }
+
+  // 自己離開大廳：關掉連線，但不算「意外斷線」，所以不呼叫 onclose
+  close() {
+    const ws = this.ws;
+    this.ws = null;
+    if (!ws) return;
+    ws.onclose = null;
+    ws.onmessage = null;
+    ws.close();
   }
 }
