@@ -41,6 +41,7 @@ async function server(options = {}) {
 // context 可以換掉瀏覽器環境（例如手機的螢幕大小和觸控）
 async function player(t, url, name, { join = true, latency = 0, context = {} } = {}) {
   const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, ...context });
+  if (context.hasTouch) await ctx.addInitScript(stayWindowed);
   const page = await ctx.newPage();
   const errors = [];
   page.on('console', (m) => {
@@ -299,6 +300,12 @@ test('伺服器關掉時，畫面會提示連線中斷', async (t) => {
 // 手機（觸控）和純靜態網站（GitHub Pages）
 // 手機測試一律用 tap / 觸控事件；用 click() 會變成滑鼠，遊戲會切回滑鼠模式把觸控按鈕藏起來。
 
+// 手機上按「單人對戰」會切成全螢幕。真的手機全螢幕還是手機的大小，
+// 但無頭的 Firefox 全螢幕會把視窗撐成電腦螢幕的 1366x768，手機版面就測不到了，所以測試時不切全螢幕
+function stayWindowed() {
+  Element.prototype.requestFullscreen = () => Promise.resolve();
+}
+
 // 手機的瀏覽器環境。isMobile 在 Firefox 不支援，其他兩種才傳
 const phoneContext = (width, height) => ({
   viewport: { width, height },
@@ -470,6 +477,7 @@ test('手機直拿：版面不會超出螢幕', async (t) => {
 
   await noOverflow('標題畫面');
   await soloLobby(page, '直拿');
+  assert.equal(await page.evaluate(() => innerWidth), 390, '畫面寬度要維持手機直拿的 390');
   await noOverflow('大廳');
 
   // 一欄式的大廳可以往下捲，但「開始對戰」一定要捲得到、而且完整在螢幕內
@@ -639,6 +647,7 @@ test('安裝成 App：manifest 和圖示都正確，離線也能玩單人模式'
 }, async (t) => {
   const site = await staticSite(t);
   const ctx = await browser.newContext({ ...phoneContext(844, 390), serviceWorkers: 'allow' });
+  await ctx.addInitScript(stayWindowed);
   t.after(() => ctx.close());
   const page = await ctx.newPage();
   const errors = [];
