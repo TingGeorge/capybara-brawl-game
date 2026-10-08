@@ -40,7 +40,9 @@ async function server(options = {}) {
 // 開一個玩家的瀏覽器分頁。會把 main.js 裡的 game 物件露出來給測試讀（不影響遊戲本身）
 // context 可以換掉瀏覽器環境（例如手機的螢幕大小和觸控）
 async function player(t, url, name, { join = true, latency = 0, context = {} } = {}) {
-  const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, ...context });
+  // 不讓網頁註冊 service worker：被 service worker 接手的請求，page.route 改不到，
+  // 重新整理後就拿不到下面塞進 main.js 的 window.__game（離線測試另外開自己的 context）
+  const ctx = await browser.newContext({ viewport: { width: 1366, height: 768 }, serviceWorkers: 'block', ...context });
   if (context.hasTouch) await ctx.addInitScript(stayWindowed);
   const page = await ctx.newPage();
   const errors = [];
