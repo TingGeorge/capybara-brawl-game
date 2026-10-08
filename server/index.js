@@ -73,7 +73,9 @@ function serveStatic(req, res) {
 }
 
 export function startServer(port = PORT, { quiet = false, duration = envNumber('MATCH_SECONDS'), koTarget = envNumber('KO_TARGET') } = {}) {
-  const lobby = new Lobby({ lanUrls: () => lanAddresses().map((ip) => `http://${ip}:${port}`), duration, koTarget });
+  // 埠號用實際開起來的那個（傳 0 時由系統挑一個空的埠號）
+  const boundPort = () => (server.address() && server.address().port) || port;
+  const lobby = new Lobby({ lanUrls: () => lanAddresses().map((ip) => `http://${ip}:${boundPort()}`), duration, koTarget });
   const server = http.createServer(serveStatic);
 
   server.on('upgrade', (req, socket, head) => {

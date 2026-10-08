@@ -19,7 +19,6 @@ const BROWSER = process.env.BROWSER || 'chromium';
 const ARTIFACTS = path.join(path.dirname(fileURLToPath(import.meta.url)), 'artifacts');
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 let browser;
-let nextPort = 41000 + Math.floor(Math.random() * 1000);
 
 before(async () => {
   fs.mkdirSync(ARTIFACTS, { recursive: true });
@@ -29,12 +28,12 @@ after(async () => {
   await browser?.close();
 });
 
-// 每個測試開一台自己的伺服器，互不干擾
+// 每個測試開一台自己的伺服器，互不干擾。
+// 埠號交給系統挑一個空的（自己隨便挑，偶爾會剛好被 CI 機器上別的程式佔走）
 async function server(options = {}) {
-  const port = nextPort++;
-  const srv = startServer(port, { quiet: true, ...options });
+  const srv = startServer(0, { quiet: true, ...options });
   await new Promise((r) => (srv.server.listening ? r() : srv.server.once('listening', r)));
-  return { ...srv, url: `http://127.0.0.1:${port}` };
+  return { ...srv, url: `http://127.0.0.1:${srv.server.address().port}` };
 }
 
 // 開一個玩家的瀏覽器分頁。會把 main.js 裡的 game 物件露出來給測試讀（不影響遊戲本身）
